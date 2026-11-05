@@ -6,6 +6,7 @@ import ControlPanel from '../components/ControlPanel';
 import SettingsPanel from '../components/SettingsPanel';
 import LogsPanel from '../components/LogsPanel';
 import StatsPanel from '../components/StatsPanel';
+import ConnectionDashboard from '../components/ConnectionDashboard';
 import InfoPanel from '../components/InfoPanel';
 import UpdateBanner from '../components/UpdateBanner';
 import Onboarding from '../components/Onboarding';
