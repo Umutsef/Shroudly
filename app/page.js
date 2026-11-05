@@ -194,7 +194,14 @@ export default function Home() {
         className="scroll rise min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-4 sm:px-5"
       >
         {activeTab === 'control'  && <ControlPanel dpiStatus={dpiStatus} onStatusChange={refresh} onSupport={supportLink ? openSupport : null} />}
-        {activeTab === 'stats'    && <StatsPanel active={active} />}
+        
+{activeTab === 'stats' && (
+  <div className="space-y-4">
+    <ConnectionDashboard />
+    <StatsPanel active={active} />
+  </div>
+)}
+
         {activeTab === 'settings' && <SettingsPanel active={active} />}
         {activeTab === 'logs'     && <LogsPanel />}
         {activeTab === 'info'     && <InfoPanel version={version} supportFocus={supportFocus} />}
