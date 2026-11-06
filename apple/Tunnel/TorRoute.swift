@@ -1,4 +1,91 @@
 import Foundation
+#if os(macOS) || os(iOS)
+import UserNotifications
+#endif
+
+/* A site that only the last way out (Tor) opened, said to the user: it is
+ * slower, and some sites ask Tor's visitors for a captcha. A notification on
+ * the Mac (the only Apple system with Tor), in the words the app left in
+ * the shared settings (TunnelController, TorNotice.textKey). Once per site
+ * while protection is on, and at most once every 15 minutes. */
+enum TorNotice {
+    static let textKey = "torUsedText"
+    /* The words for a DNS profile or app in the way (TunnelController). */
+    static let dnsTextKey = "dnsAroundText"
+    static let every: TimeInterval = 15 * 60
+    private static let lock = NSLock()
+    private static var told = Set<String>()
+    private static var lastAt: Date?
+
+    /* Whether `host` is to be said now. */
+    static func due(_ host: String, now: Date = Date()) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let h = host.lowercased()
+        guard !h.isEmpty, told.insert(h).inserted else { return false }
+        if let l = lastAt, now.timeIntervalSince(l) < every { return false }
+        lastAt = now
+        return true
+    }
+
+    static func reset() {
+        lock.lock(); told.removeAll(); lastAt = nil; askedAt = nil; lock.unlock()
+    }
+
+    /* A notification in the app's words (left under `key`), where the
+     * system allows the app's notifications; on iPhone, iPad and Apple TV
+     * the app's own card says it too (ContentView). */
+    static func post(key: String, id: String) {
+        #if os(macOS) || os(iOS)
+        guard let text = AppGroup.defaults.string(forKey: key), !text.isEmpty else { return }
+        let c = UNMutableNotificationContent()
+        c.title = "Shroudly"
+        c.body = text
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil)) { _ in }
+        #endif
+    }
+
+    /* Tor is slow: before it first starts the user says yes (issue #77).
+     * Until then a site that needs it is asked about: the app's card
+     * (ContentView) and, so the user knows to look there, a notification,
+     * at most every `askEvery`. The answer is kept in the app group. */
+    static let askTextKey = "torAskText"
+    static let approvedKey = "torApproved"
+    static let askEvery: TimeInterval = 30 * 60
+    private static var askedAt: Date?
+
+    static func approved() -> Bool { AppGroup.defaults.bool(forKey: approvedKey) }
+
+    /* Whether to say it now (pure but for the clock, for the tests). */
+    static func askDue(now: Date = Date()) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if let a = askedAt, now.timeIntervalSince(a) < askEvery { return false }
+        askedAt = now
+        return true
+    }
+
+    static func ask(_ host: String) {
+        guard askDue() else { return }
+        #if os(macOS) || os(iOS)
+        guard let text = AppGroup.defaults.string(forKey: askTextKey), !text.isEmpty else { return }
+        let c = UNMutableNotificationContent()
+        c.title = "Shroudly"
+        c.body = text.replacingOccurrences(of: "{host}", with: host.lowercased())
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "tor-ask", content: c, trigger: nil)) { _ in }
+        #endif
+    }
+
+    static func used(_ host: String) {
+        guard due(host) else { return }
+        #if os(macOS)
+        guard let text = AppGroup.defaults.string(forKey: textKey), !text.isEmpty else { return }
+        let c = UNMutableNotificationContent()
+        c.title = "Shroudly"
+        c.body = text.replacingOccurrences(of: "{host}", with: host.lowercased())
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "tor-used", content: c, trigger: nil)) { _ in }
+        #endif
+    }
+}
+
 #if SHROUDLY_TOR
 import IPtProxy
 import ShroudlyNative
@@ -215,7 +302,7 @@ final class TorRoute {
     private func armIdle() {
         idleTimer?.cancel()
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 60, repeating: 60)
+        t.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(10))
         t.setEventHandler { [weak self] in
             guard let self, self.state == .ready else { return }
             let n = self.usedCount()

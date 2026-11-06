@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">Qidiring yoki bloklash uchun sayt yozing</string>
     <string name="connsSystem">Shroudly ishlatadi</string>
-    <string name="connsSystemConfirm">Shroudly {host} manzilidan o\'zi foydalanadi. Bloklash shifrlangan DNS, yangilanishlar yoki so\'nggi yo\'lni buzishi, saytlar ochilmay qolishi mumkin. Baribir bloklansinmi?</string>
     <string name="connsTitle">Saytlar bo\'yicha ulanishlar</string>
+    <string name="dnsAroundAndroid">Bu qurilmada ilovalarning nom soʻrovlariga boshqa narsa javob beradi (Shaxsiy DNS yoki DNS ilovasi), shuning uchun bloklangan ilovalar ochilmasligi mumkin. Sozlamalar → Tarmoq → Shaxsiy DNS boʻlimida “Oʻchiq” yoki “Avtomatik”ni tanlang, DNS ilovalarini yoping, soʻng Shroudly’ni qayta ishga tushiring.</string>
     <string name="dnsErrorEmpty">Server manzilini yozing, masalan {example}.</string>
     <string name="dnsErrorHost">Bu na IP manzil, na server nomi; uni {example} kabi yozing.</string>
     <string name="dnsErrorPort">Port 1 dan 65535 gacha boʻlgan son boʻlishi kerak.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Shroudlyʼni chetlab oʻtadigan ilovalar</string>
     <string name="excludedAppsCount">Shroudlyʼni chetlab oʻtadigan ilovalar: {count}</string>
     <string name="excludedAppsDesc">Ularning trafigi Shroudlyʼdan oʻtmay toʻgʻridan-toʻgʻri chiqadi: masalan, unga muhtoj boʻlmagan oʻyin.</string>
+    <string name="followCodeshare">Shroudly’ni yaratuvchi Codeshare</string>
+    <string name="followDesc">Bloklar, yangi versiyalar va aylanib oʻtish yoʻllari haqidagi yangiliklar birinchi boʻlib shu yerda. Kuzatish va ulashish Shroudly’ga unga muhtoj odamlarga yetib borishga yordam beradi va bepul.</string>
+    <string name="followDeveloper">Shroudly dasturchisi Umut Bayraktar</string>
+    <string name="followTitle">Shroudly’ni kuzating</string>
+    <string name="followTv">Bularni telefon yoki kompyuteringizda oching:</string>
     <string name="helpNudgeBodyPhone">Bepul ilova internetni senzura qiladigan mamlakatlardagi odamlarga bloklarni chetlab oʻtish uchun bu telefon ulanishining kichik bir qismidan foydalanish imkonini beradi. Siz uchun xavfsiz: ular telefoningizga ham, tarmogʻingizga ham yeta olmaydi, ochgan saytlari esa hech qachon manzilingizni koʻrmaydi.</string>
     <string name="helpNudgeShow">Koʻrsatish</string>
     <string name="helpNudgeTitle">Senzura bor mamlakatlardagi odamlarga yordam berasizmi?</string>
@@ -157,6 +162,7 @@
     <string name="language">Til</string>
     <string name="languageSystem">Tizimdagidek</string>
     <string name="lastResort">Boshqa hech narsa ishlamasa: Tor tarmog\'i</string>
+    <string name="lastResortAsks">Shroudly undan birinchi marta foydalanishdan oldin sizdan so\'raydi.</string>
     <string name="lastResortDesc">Hech bir usul ocha olmagan sayt Tor orqali ochiladi, Tor\'ga esa Snowflake orqali, ya\'ni ko\'ngillilarning ulanishlari orqali yetiladi (ular orasida «Senzura bor mamlakatlardagi odamlarga yordam berish»ni yoqqanlarning barchasi bor). Sekinroq, ba\'zi saytlar Tor\'dan kelganlardan kapcha so\'raydi. Tor faqat sayt unga muhtoj bo\'lganda ishga tushadi.</string>
     <string name="lastResortFailed">Tor tarmog\'iga ulanib bo\'lmadi; sayt muhtoj bo\'lganda yana uriniladi</string>
     <string name="lastResortOwnServer">O\'z serveringiz o\'rnatilganda ishlatilmaydi: barcha saytlar o\'sha server orqali o\'tadi.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">Boshqa yo\'l bilan ochilmaydigan saytlar uchun Tor tarmog\'iga ulanmoqda… {progress}%</string>
     <string name="linkReleases">Reliz qaydlari</string>
     <string name="linkSourceCode">GitHubdagi manba kodi</string>
+    <string name="linkWebsite">Codeshare sayti</string>
     <string name="madeBy">Codeshare Technology Ltd mahsuloti</string>
     <string name="nationalOnlyBody">Dunyoning qolgan qismi bilan aloqa uzilgan; mamlakat ichidagi saytlar hali ochilmoqda. Buni hech bir ilova yoki VPN chetlab oʻta olmaydi. Aloqa qaytganda Shroudly oʻzi davom etadi.</string>
     <string name="nationalOnlyHelp">Yana nima yordam berishi mumkin</string>
     <string name="nationalOnlyTitle">Faqat shu mamlakat tarmogʻi ishlayapti</string>
+    <string name="navFollow">Kuzatish</string>
     <string name="navInfo">Haqida</string>
     <string name="navProtection">Himoya</string>
     <string name="navSettings">Sozlamalar</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">u javob beradi, lekin u orqali hech bir sayt ochilmadi</string>
     <string name="protected_">Himoyalangan</string>
     <string name="protectionStopped">Himoya oʻchirildi</string>
+    <string name="reopenAppsHint">Oldin ochiq boʻlgan ilovalar: biri ulanmasa, uni yopib, bir marta qayta oching.</string>
     <string name="searchApps">Ilova qidirish</string>
     <string name="shareApp">Shroudly’ni ulashish</string>
     <string name="shareAppText">Bloklangan saytlar va ilovalarni ochish uchun Android uchun Shroudly {version}. Oʻrnatish uchun shu faylni oching; telefon soʻrasa, shu manbadan ilova oʻrnatishga ruxsat bering.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Shroudlyʼni qoʻllab-quvvatlash</string>
     <string name="tagline">Koʻrinmas. Toʻxtatib boʻlmas.</string>
     <string name="testing">Tekshirilmoqda…</string>
+    <string name="torAskCard">Bu tarmoqda hech bir usul {host} saytini ocha olmadi. Shroudly uni Tor tarmog\'i orqali ochishi mumkin: ancha sekin (sahifalar va videolar sekin yuklanadi), ba\'zi saytlar captcha so\'raydi. Javobingiz saqlanadi; uni Sozlamalarda o\'zgartirishingiz mumkin.</string>
+    <string name="torAskNo">Yo\'q</string>
+    <string name="torAskNotice">Bu tarmoqda hech bir usul {host} saytini ocha olmadi. Shroudly uni so\'nggi chorasi — Tor tarmog\'i orqali ochishi mumkin, lekin ancha sekinroq. Ruxsat berish yoki rad etish uchun Shroudly\'ni oching.</string>
+    <string name="torAskTitle">{host} Tor orqali ochilsinmi?</string>
+    <string name="torAskYes">Tor\'dan foydalanish</string>
+    <string name="torUsedPhone">{host} faqat Tor tarmogʻi orqali ochildi — bu Shroudly’ning soʻnggi yoʻli: bu tarmoqda boshqa hech narsa oʻtmadi. Bu sekinroq va ayrim saytlar kapcha soʻraydi; boshqa ilovalar va saytlar avvalgidek ishlaydi.</string>
+    <string name="torUsedTv">{host} faqat Tor tarmogʻi orqali ochildi — bu Shroudly’ning soʻnggi yoʻli. Undagi videolar sekin yoki pastroq sifatda yuklanishi mumkin; boshqa ilovalar avvalgidek ishlaydi.</string>
     <string name="totalCount">Jami: {count}</string>
     <string name="updAvailable">{version} versiyasi mavjud</string>
     <string name="updDownload">Yuklab olish va oʻrnatish</string>
@@ -247,7 +263,7 @@
     <string name="upload">Yuklash</string>
     <string name="uptime">Ish vaqti</string>
     <string name="versionLabel">Versiya {version}</string>
-    <string name="whatsNewAndroid">Saytlar bo\'yicha ulanishlar: Shroudly orqali nima o\'tayotganini ikki tomonlama ma\'lumoti bilan ko\'ring va istalgan saytni bloklang (#74).\nBloklash saytning ulanishlarini darhol uzadi; ro\'yxat qurilmangizda qoladi.</string>
+    <string name="whatsNewAndroid">Ulanishlar: Shroudly\'ning o\'ziga kerakli nomlar (DNS, Tor, o\'z saytlari) endi xato bilan bloklanmaydi.\nShroudly\'ni kuzating: avval dasturchining akkauntlari — yangiliklar va shoshilinch xabarlar o\'sha yerda.</string>
     <string name="whatsNewOk">Tushunarli</string>
     <string name="whatsNewTitle">{version} versiyasida yangiliklar</string>
 </resources>

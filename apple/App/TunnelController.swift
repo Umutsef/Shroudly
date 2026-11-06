@@ -1,4 +1,7 @@
 import Foundation
+#if os(macOS)
+import UserNotifications
+#endif
 import NetworkExtension
 
 /*
@@ -26,6 +29,10 @@ final class TunnelController: ObservableObject {
     // The last way out (Tunnel/TorRoute.swift) while it is not off: its state
     // ("starting", "ready", "failed") and progress, from the stats answer.
     @Published private(set) var lastResort: (state: String, progress: Int)?
+    /* A DNS profile or app goes around the tunnel (the engine's dns_around). */
+    @Published private(set) var dnsAround = false
+    /* A site needs Tor and the user has not said yes yet: its name (issue #77). */
+    @Published private(set) var torAsk: String?
     /* This copy may not make a VPN at all: signed without Apple's VPN
      * permission (VpnErrors, issue #65). The notice says so, with how to
      * install it properly. */
@@ -71,6 +78,16 @@ final class TunnelController: ObservableObject {
             }
             return
         }
+        // The tunnel's notices (Tunnel/TorRoute.swift, TorNotice) in the app's
+        // words: a DNS profile or app in the way, and (Mac) the last way out.
+        AppGroup.defaults.set(tr("dnsAroundApple"), forKey: "dnsAroundText")
+        #if os(macOS)
+        if store.load().torLastResort {
+            AppGroup.defaults.set(tr("torUsedDesktop"), forKey: "torUsedText")
+            AppGroup.defaults.set(tr("torAskNotice"), forKey: "torAskText")
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+        #endif
         do {
             try m.connection.startVPNTunnel()
             log.write("Start asked")
@@ -152,7 +169,9 @@ final class TunnelController: ObservableObject {
                 done.resume(returning: nil)
             }
         }
-        guard let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { lastResort = nil; return nil }
+        guard let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { lastResort = nil; dnsAround = false; torAsk = nil; return nil }
+        dnsAround = (obj["dnsAround"] as? Bool) == true
+        torAsk = obj["torAsk"] as? String
         if let t = obj["lastResort"] as? [String: Any], let st = t["state"] as? String {
             lastResort = (st, (t["progress"] as? NSNumber)?.intValue ?? 0)
         } else {
@@ -160,6 +179,25 @@ final class TunnelController: ObservableObject {
         }
         guard let s = obj["stats"] as? [String: Any], !s.isEmpty else { return nil }
         return EngineStats(s)
+    }
+
+    /* The user's answer to Tor (ContentView's card, issue #77): yes starts
+     * it and is kept; no turns the last way out off (Settings turns it on). */
+    func answerTor(_ yes: Bool) async {
+        torAsk = nil
+        if yes {
+            AppGroup.defaults.set(true, forKey: "torApproved")
+            guard let session = manager?.connection as? NETunnelProviderSession else { return }
+            try? session.sendProviderMessage(Data(ProviderMessage.torYes.rawValue.utf8)) { _ in }
+        } else {
+            AppGroup.defaults.set(false, forKey: "torApproved")
+            let store = SettingsStore()
+            let old = store.load()
+            var new = old
+            new.torLastResort = false
+            store.save(new)
+            await settingsChanged(from: old, to: new)
+        }
     }
 
     /* The Connections list (issue #74), while protection is on. */

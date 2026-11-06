@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">Pesquise ou digite um site para bloquear</string>
     <string name="connsSystem">usado pelo Shroudly</string>
-    <string name="connsSystemConfirm">O próprio Shroudly usa {host}. Bloquear pode quebrar o DNS criptografado, as atualizações ou a última saída, e os sites podem parar de abrir. Bloquear mesmo assim?</string>
     <string name="connsTitle">Conexões por site</string>
+    <string name="dnsAroundAndroid">Outra coisa neste aparelho responde às buscas de nomes dos apps (DNS privado ou um app de DNS), então apps bloqueados podem não abrir. Em Configurações → Rede → DNS privado, escolha Desativado ou Automático, feche qualquer app de DNS e inicie o Shroudly de novo.</string>
     <string name="dnsErrorEmpty">Digite o endereço do servidor, como {example}.</string>
     <string name="dnsErrorHost">Isso não é um endereço IP nem um nome de servidor; digite como {example}.</string>
     <string name="dnsErrorPort">A porta deve ser um número de 1 a 65535.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Apps que não passam pelo Shroudly</string>
     <string name="excludedAppsCount">Apps que não passam pelo Shroudly: {count}</string>
     <string name="excludedAppsDesc">O tráfego delas sai direto, sem passar pelo Shroudly: por exemplo, um jogo que não precisa dele.</string>
+    <string name="followCodeshare">Codeshare, quem faz o Shroudly</string>
+    <string name="followDesc">Notícias sobre bloqueios, novas versões e formas de passar, em primeira mão. Seguir e compartilhar é como o Shroudly chega a quem precisa, e não custa nada.</string>
+    <string name="followDeveloper">Umut Bayraktar, o desenvolvedor do Shroudly</string>
+    <string name="followTitle">Siga o Shroudly</string>
+    <string name="followTv">Abra-os no seu celular ou computador:</string>
     <string name="helpNudgeBodyPhone">Um app gratuito permite que pessoas em países que censuram a internet usem um pouco da conexão deste celular para passar pelos bloqueios. É seguro para você: elas não conseguem chegar ao seu celular nem à sua rede, e os sites que abrem nunca veem o seu endereço.</string>
     <string name="helpNudgeShow">Mostrar</string>
     <string name="helpNudgeTitle">Ajudar pessoas em países com censura?</string>
@@ -157,6 +162,7 @@
     <string name="language">Idioma</string>
     <string name="languageSystem">Padrão do sistema</string>
     <string name="lastResort">Quando nada mais funciona: a rede Tor</string>
+    <string name="lastResortAsks">O Shroudly pergunta antes de usá-la pela primeira vez.</string>
     <string name="lastResortDesc">Um site que nenhuma técnica abre passa pelo Tor, alcançado pelo Snowflake: as conexões de voluntários, entre eles todos que ativaram “Ajudar pessoas em países censurados”. É mais lento, e alguns sites pedem captcha a quem chega pelo Tor. O Tor só inicia quando um site precisa dele.</string>
     <string name="lastResortFailed">Não foi possível alcançar a rede Tor; nova tentativa quando um site precisar</string>
     <string name="lastResortOwnServer">Não é usado enquanto o seu próprio servidor estiver definido: esse servidor leva todos os sites.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">Conectando à rede Tor para os sites que nada mais abre… {progress}%</string>
     <string name="linkReleases">Notas da versão</string>
     <string name="linkSourceCode">Código-fonte no GitHub</string>
+    <string name="linkWebsite">Site da Codeshare</string>
     <string name="madeBy">Um produto da Codeshare Technology Ltd</string>
     <string name="nationalOnlyBody">A conexão com o resto do mundo está cortada; os sites do país ainda abrem. Nenhum app nem VPN passa por isso. O Shroudly continua sozinho quando ela voltar.</string>
     <string name="nationalOnlyHelp">O que ainda pode ajudar</string>
     <string name="nationalOnlyTitle">Só a rede deste país funciona</string>
+    <string name="navFollow">Seguir</string>
     <string name="navInfo">Sobre</string>
     <string name="navProtection">Proteção</string>
     <string name="navSettings">Ajustes</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">ele responde, mas nenhum site passou por ele</string>
     <string name="protected_">Protegido</string>
     <string name="protectionStopped">Proteção interrompida</string>
+    <string name="reopenAppsHint">Apps que já estavam abertos: se um não conectar, feche e abra de novo uma vez.</string>
     <string name="searchApps">Buscar apps</string>
     <string name="shareApp">Compartilhar o Shroudly</string>
     <string name="shareAppText">Shroudly {version} para Android, para abrir sites e apps bloqueados. Para instalar, abra este arquivo; se o celular pedir, permita instalar apps desta fonte.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Apoie o Shroudly</string>
     <string name="tagline">Invisível. Imparável.</string>
     <string name="testing">Testando…</string>
+    <string name="torAskCard">Nenhuma técnica abriu {host} nesta rede. O Shroudly pode abri-lo pela rede Tor: bem mais lento (páginas e vídeos carregam devagar), e alguns sites pedem um captcha. Sua resposta fica guardada; você pode mudá-la nos Ajustes.</string>
+    <string name="torAskNo">Não</string>
+    <string name="torAskNotice">Nenhuma técnica abriu {host} nesta rede. O Shroudly pode abri-lo pela rede Tor, seu último recurso, mas bem mais devagar. Abra o Shroudly para permitir ou recusar.</string>
+    <string name="torAskTitle">Abrir {host} pelo Tor?</string>
+    <string name="torAskYes">Usar o Tor</string>
+    <string name="torUsedPhone">{host} só abriu pela rede Tor, o último recurso do Shroudly: nada mais funcionou nesta rede. É mais lento e alguns sites pedem um captcha; seus outros apps e sites continuam como antes.</string>
+    <string name="torUsedTv">{host} só abriu pela rede Tor, o último recurso do Shroudly. Os vídeos dele podem carregar devagar ou com qualidade menor; seus outros apps continuam como antes.</string>
     <string name="totalCount">Total: {count}</string>
     <string name="updAvailable">A versão {version} está disponível</string>
     <string name="updDownload">Baixar e instalar</string>
@@ -247,7 +263,7 @@
     <string name="upload">Enviado</string>
     <string name="uptime">Tempo ativo</string>
     <string name="versionLabel">Versão {version}</string>
-    <string name="whatsNewAndroid">Conexões por site: veja o que passa pelo Shroudly, com os dados em cada sentido, e bloqueie o site que quiser (#74).\nBloquear um site encerra as conexões dele na hora; a lista fica no seu dispositivo.</string>
+    <string name="whatsNewAndroid">Conexões: os nomes de que o Shroudly precisa (seu DNS, o Tor, seus próprios sites) não podem mais ser bloqueados por engano.\nSiga o Shroudly: primeiro as contas do desenvolvedor; lá saem as novidades e os avisos urgentes.</string>
     <string name="whatsNewOk">Entendi</string>
     <string name="whatsNewTitle">Novidades da {version}</string>
 </resources>

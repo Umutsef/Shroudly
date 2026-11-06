@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">ค้นหาหรือพิมพ์เว็บไซต์ที่จะบล็อก</string>
     <string name="connsSystem">Shroudly ใช้</string>
-    <string name="connsSystemConfirm">Shroudly ใช้ {host} เอง การบล็อกอาจทำให้ DNS แบบเข้ารหัส การอัปเดต หรือทางออกสุดท้ายใช้ไม่ได้ และเว็บไซต์อาจเปิดไม่ได้ บล็อกต่อหรือไม่</string>
     <string name="connsTitle">การเชื่อมต่อตามเว็บไซต์</string>
+    <string name="dnsAroundAndroid">มีสิ่งอื่นในอุปกรณ์นี้ตอบการค้นหาชื่อของแอป (DNS ส่วนตัวหรือแอป DNS) แอปที่ถูกบล็อกจึงอาจเปิดไม่ได้ ไปที่ การตั้งค่า → เครือข่าย → DNS ส่วนตัว แล้วเลือกปิดหรืออัตโนมัติ ปิดแอป DNS แล้วเริ่ม Shroudly ใหม่</string>
     <string name="dnsErrorEmpty">พิมพ์ที่อยู่ของเซิร์ฟเวอร์ เช่น {example}</string>
     <string name="dnsErrorHost">นี่ไม่ใช่ที่อยู่ IP หรือชื่อเซิร์ฟเวอร์ พิมพ์แบบ {example}</string>
     <string name="dnsErrorPort">พอร์ตต้องเป็นตัวเลขตั้งแต่ 1 ถึง 65535</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">แอปที่ไม่ผ่าน Shroudly</string>
     <string name="excludedAppsCount">แอปที่ไม่ผ่าน Shroudly: {count}</string>
     <string name="excludedAppsDesc">ทราฟฟิกของแอปเหล่านี้ออกไปตรง ๆ โดยไม่ผ่าน Shroudly เช่น เกมที่ไม่จำเป็นต้องใช้</string>
+    <string name="followCodeshare">Codeshare ผู้สร้าง Shroudly</string>
+    <string name="followDesc">ข่าวเรื่องการบล็อก เวอร์ชันใหม่ และวิธีผ่าน ก่อนใคร การติดตามและแชร์คือทางที่ Shroudly จะไปถึงคนที่ต้องการ และไม่มีค่าใช้จ่าย</string>
+    <string name="followDeveloper">Umut Bayraktar ผู้พัฒนา Shroudly</string>
+    <string name="followTitle">ติดตาม Shroudly</string>
+    <string name="followTv">เปิดสิ่งเหล่านี้บนโทรศัพท์หรือคอมพิวเตอร์ของคุณ:</string>
     <string name="helpNudgeBodyPhone">แอปฟรีช่วยให้ผู้คนในประเทศที่เซ็นเซอร์อินเทอร์เน็ตใช้การเชื่อมต่อของโทรศัพท์เครื่องนี้เพียงเล็กน้อยเพื่อผ่านการบล็อก ปลอดภัยสำหรับคุณ: พวกเขาเข้าถึงโทรศัพท์หรือเครือข่ายของคุณไม่ได้ และเว็บไซต์ที่พวกเขาเปิดจะไม่มีวันเห็นที่อยู่ของคุณ</string>
     <string name="helpNudgeShow">ดูวิธี</string>
     <string name="helpNudgeTitle">ช่วยผู้คนในประเทศที่มีการเซ็นเซอร์ไหม?</string>
@@ -157,6 +162,7 @@
     <string name="language">ภาษา</string>
     <string name="languageSystem">ค่าเริ่มต้นของระบบ</string>
     <string name="lastResort">เมื่อวิธีอื่นใช้ไม่ได้: เครือข่าย Tor</string>
+    <string name="lastResortAsks">Shroudly จะถามคุณก่อนใช้ครั้งแรก</string>
     <string name="lastResortDesc">เว็บไซต์ที่ไม่มีเทคนิคใดเปิดได้จะผ่าน Tor ซึ่งเข้าถึงผ่าน Snowflake: การเชื่อมต่อของอาสาสมัคร รวมถึงทุกคนที่เปิด “ช่วยผู้คนในประเทศที่ถูกเซ็นเซอร์” ช้ากว่า และบางเว็บไซต์ขอแคปต์ชาจากผู้ที่มาจาก Tor โดย Tor จะเริ่มทำงานเมื่อมีเว็บไซต์ต้องการเท่านั้น</string>
     <string name="lastResortFailed">เข้าถึงเครือข่าย Tor ไม่ได้ จะลองใหม่เมื่อมีเว็บไซต์ต้องการ</string>
     <string name="lastResortOwnServer">ไม่ใช้ขณะที่ตั้งเซิร์ฟเวอร์ของคุณเองไว้: เซิร์ฟเวอร์นั้นพาทุกเว็บไซต์ไป</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">กำลังเชื่อมต่อเครือข่าย Tor สำหรับเว็บไซต์ที่เปิดด้วยวิธีอื่นไม่ได้… {progress}%</string>
     <string name="linkReleases">บันทึกประจำรุ่น</string>
     <string name="linkSourceCode">ซอร์สโค้ดบน GitHub</string>
+    <string name="linkWebsite">เว็บไซต์ Codeshare</string>
     <string name="madeBy">ผลิตภัณฑ์ของ Codeshare Technology Ltd</string>
     <string name="nationalOnlyBody">การเชื่อมต่อกับส่วนอื่นของโลกถูกตัด เว็บไซต์ในประเทศยังเปิดได้ ไม่มีแอปหรือ VPN ใดผ่านสิ่งนี้ได้ Shroudly จะทำงานต่อเองเมื่อการเชื่อมต่อกลับมา</string>
     <string name="nationalOnlyHelp">อะไรยังช่วยได้บ้าง</string>
     <string name="nationalOnlyTitle">ใช้ได้เฉพาะเครือข่ายในประเทศนี้</string>
+    <string name="navFollow">ติดตาม</string>
     <string name="navInfo">เกี่ยวกับ</string>
     <string name="navProtection">การป้องกัน</string>
     <string name="navSettings">การตั้งค่า</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">เซิร์ฟเวอร์ตอบกลับ แต่ไม่มีเว็บไซต์ใดผ่านมาได้</string>
     <string name="protected_">ได้รับการป้องกัน</string>
     <string name="protectionStopped">หยุดการป้องกันแล้ว</string>
+    <string name="reopenAppsHint">แอปที่เปิดไว้ก่อนแล้ว: ถ้าแอปใดเชื่อมต่อไม่ได้ ให้ปิดแล้วเปิดใหม่หนึ่งครั้ง</string>
     <string name="searchApps">ค้นหาแอป</string>
     <string name="shareApp">แชร์ Shroudly</string>
     <string name="shareAppText">Shroudly {version} สำหรับ Android ใช้เปิดเว็บไซต์และแอปที่ถูกบล็อก หากต้องการติดตั้ง ให้เปิดไฟล์นี้ หากโทรศัพท์ถาม ให้อนุญาตการติดตั้งแอปจากแหล่งนี้</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">สนับสนุน Shroudly</string>
     <string name="tagline">มองไม่เห็น ไม่มีใครหยุดได้</string>
     <string name="testing">กำลังทดสอบ…</string>
+    <string name="torAskCard">ไม่มีวิธีใดเปิด {host} ได้บนเครือข่ายนี้ Shroudly เปิดได้ผ่านเครือข่าย Tor: ช้ากว่ามาก (หน้าเว็บและวิดีโอโหลดช้า) และบางเว็บไซต์ขอ captcha ระบบจะจำคำตอบของคุณไว้ เปลี่ยนได้ในการตั้งค่า</string>
+    <string name="torAskNo">ไม่</string>
+    <string name="torAskNotice">ไม่มีวิธีใดเปิด {host} ได้บนเครือข่ายนี้ Shroudly เปิดได้ผ่านเครือข่าย Tor ซึ่งเป็นทางสุดท้าย แต่ช้ากว่ามาก เปิด Shroudly เพื่ออนุญาตหรือปฏิเสธ</string>
+    <string name="torAskTitle">เปิด {host} ผ่าน Tor ไหม?</string>
+    <string name="torAskYes">ใช้ Tor</string>
+    <string name="torUsedPhone">{host} เปิดได้ผ่านเครือข่าย Tor เท่านั้น ซึ่งเป็นทางสุดท้ายของ Shroudly: บนเครือข่ายนี้ไม่มีวิธีอื่นใช้ได้ ช้ากว่าปกติและบางเว็บไซต์จะขอ captcha ส่วนแอปและเว็บไซต์อื่นของคุณใช้งานได้ตามเดิม</string>
+    <string name="torUsedTv">{host} เปิดได้ผ่านเครือข่าย Tor เท่านั้น ซึ่งเป็นทางสุดท้ายของ Shroudly วิดีโอจากที่นั่นอาจโหลดช้าหรือคุณภาพต่ำลง ส่วนแอปอื่นของคุณใช้งานได้ตามเดิม</string>
     <string name="totalCount">ทั้งหมด: {count}</string>
     <string name="updAvailable">มีเวอร์ชัน {version} ให้ใช้งานแล้ว</string>
     <string name="updDownload">ดาวน์โหลดและติดตั้ง</string>
@@ -247,7 +263,7 @@
     <string name="upload">อัปโหลด</string>
     <string name="uptime">เวลาทำงาน</string>
     <string name="versionLabel">เวอร์ชัน {version}</string>
-    <string name="whatsNewAndroid">การเชื่อมต่อตามเว็บไซต์: ดูว่าอะไรผ่าน Shroudly พร้อมข้อมูลทั้งสองทิศ และบล็อกเว็บไซต์ใดก็ได้ (#74)\nการบล็อกจะตัดการเชื่อมต่อของเว็บนั้นทันที รายการอยู่บนอุปกรณ์ของคุณ</string>
+    <string name="whatsNewAndroid">การเชื่อมต่อ: ชื่อที่ Shroudly เองต้องใช้ (DNS, Tor, เว็บไซต์ของตัวเอง) ไม่ถูกบล็อกโดยไม่ตั้งใจอีกต่อไป\nติดตาม Shroudly: บัญชีของผู้พัฒนามาก่อน ข่าวและประกาศด่วนจะโพสต์ที่นั่น</string>
     <string name="whatsNewOk">เข้าใจแล้ว</string>
     <string name="whatsNewTitle">มีอะไรใหม่ใน {version}</string>
 </resources>

@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">Издөө же бөгөттөө үчүн сайт жазыңыз</string>
     <string name="connsSystem">Shroudly колдонот</string>
-    <string name="connsSystemConfirm">Shroudly {host} дарегин өзү колдонот. Бөгөттөө шифрленген DNS\'ти, жаңыртууларды же акыркы жолду бузушу мүмкүн, сайттар ачылбай калышы мүмкүн. Баары бир бөгөттөлсүнбү?</string>
     <string name="connsTitle">Сайттар боюнча туташуулар</string>
+    <string name="dnsAroundAndroid">Бул түзмөктө колдонмолордун аталыш сурамдарына башка бир нерсе жооп берет (Жеке DNS же DNS колдонмосу), ошондуктан бөгөттөлгөн колдонмолор ачылбашы мүмкүн. Жөндөөлөр → Тармак → Жеке DNS бөлүмүндө «Өчүк» же «Автоматтык» тандаңыз, DNS колдонмолорун жабыңыз, анан Shroudly\'ни кайра иштетиңиз.</string>
     <string name="dnsErrorEmpty">Сервердин дарегин жазыңыз, мисалы {example}.</string>
     <string name="dnsErrorHost">Бул IP дарек да, сервердин аты да эмес; аны {example} сыяктуу жазыңыз.</string>
     <string name="dnsErrorPort">Порт 1ден 65535ке чейинки сан болушу керек.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Shroudly\'ди айланып өткөн колдонмолор</string>
     <string name="excludedAppsCount">Shroudly\'ди айланып өткөн колдонмолор: {count}</string>
     <string name="excludedAppsDesc">Алардын трафиги Shroudly аркылуу өтпөй, түз чыгат: мисалы, ага муктаж эмес оюн.</string>
+    <string name="followCodeshare">Shroudly\'ни жасаган Codeshare</string>
+    <string name="followDesc">Бөгөттөр, жаңы версиялар жана айланып өтүү жолдору тууралуу жаңылыктар биринчи болуп ушул жерде. Жазылуу жана бөлүшүү Shroudly\'ге аны керектегендерге жетүүгө жардам берет жана акысыз.</string>
+    <string name="followDeveloper">Shroudly\'нин иштеп чыгуучусу Умут Байрактар</string>
+    <string name="followTitle">Shroudly\'ге жазылуу</string>
+    <string name="followTv">Буларды телефонуңуздан же компьютериңизден ачыңыз:</string>
     <string name="helpNudgeBodyPhone">Акысыз колдонмо интернетке цензура койгон өлкөлөрдөгү адамдарга бөгөттөрдөн өтүү үчүн бул телефондун туташуусунун бир аз бөлүгүн колдонууга мүмкүндүк берет. Бул сиз үчүн коопсуз: алар телефонуңузга да, тармагыңызга да жете алышпайт, ал эми алар ачкан сайттар сиздин дарегиңизди эч качан көрбөйт.</string>
     <string name="helpNudgeShow">Көрсөтүү</string>
     <string name="helpNudgeTitle">Цензура бар өлкөлөрдөгү адамдарга жардам бересизби?</string>
@@ -157,6 +162,7 @@
     <string name="language">Тил</string>
     <string name="languageSystem">Системадагыдай</string>
     <string name="lastResort">Башка эч нерсе жардам бербесе: Tor тармагы</string>
+    <string name="lastResortAsks">Shroudly аны биринчи жолу колдонуудан мурун сизден сурайт.</string>
     <string name="lastResortDesc">Эч бир ыкма ача албаган сайт Tor аркылуу ачылат, ал эми Tor\'го Snowflake аркылуу, башкача айтканда ыктыярчылардын туташуулары аркылуу жетет (алардын арасында «Цензура бар өлкөлөрдөгү адамдарга жардам берүү» функциясын күйгүзгөндөрдүн баары бар). Жайыраак, айрым сайттар Tor\'дон келгендерден капча сурайт. Tor сайтка керек болгондо гана иштей баштайт.</string>
     <string name="lastResortFailed">Tor тармагына туташуу мүмкүн болбоду; сайтка керек болгондо кайра аракет кылат</string>
     <string name="lastResortOwnServer">Өз сервериңиз коюлуп турганда колдонулбайт: бардык сайт ошол сервер аркылуу өтөт.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">Башкача ачылбаган сайттар үчүн Tor тармагына туташууда… {progress}%</string>
     <string name="linkReleases">Версиялардагы өзгөрүүлөр</string>
     <string name="linkSourceCode">Баштапкы код (GitHub)</string>
+    <string name="linkWebsite">Codeshare сайты</string>
     <string name="madeBy">Codeshare Technology Ltd продуктусу</string>
     <string name="nationalOnlyBody">Дүйнөнүн калган бөлүгү менен байланыш үзүлгөн; өлкө ичиндеги сайттар дагы эле ачылат. Муну эч бир колдонмо же VPN айланып өтө албайт. Байланыш кайтканда Shroudly өзү улантат.</string>
     <string name="nationalOnlyHelp">Дагы эмне жардам берет</string>
     <string name="nationalOnlyTitle">Бул өлкөнүн тармагы гана иштейт</string>
+    <string name="navFollow">Жазылуу</string>
     <string name="navInfo">Маалымат</string>
     <string name="navProtection">Коргоо</string>
     <string name="navSettings">Жөндөөлөр</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">ал жооп берет, бирок ал аркылуу бир да сайт ачылган жок</string>
     <string name="protected_">Корголгон</string>
     <string name="protectionStopped">Коргоо токтотулду</string>
+    <string name="reopenAppsHint">Мурун ачык турган колдонмолор: бирөө туташпаса, аны жаап, бир жолу кайра ачыңыз.</string>
     <string name="searchApps">Колдонмо издөө</string>
     <string name="shareApp">Shroudly\'ни бөлүшүү</string>
     <string name="shareAppText">Бөгөттөлгөн сайттарды жана колдонмолорду ачуу үчүн Android\'ге Shroudly {version}. Орнотуу үчүн ушул файлды ачыңыз; телефон сураса, ушул булактан колдонмо орнотууга уруксат бериңиз.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Shroudly\'ни колдоо</string>
     <string name="tagline">Көрүнбөйт. Токтобойт.</string>
     <string name="testing">Текшерилүүдө…</string>
+    <string name="torAskCard">Бул тармакта эч бир ыкма {host} сайтын ачкан жок. Shroudly аны Tor тармагы аркылуу ача алат: бир топ жайыраак (барактар жана видеолор жай жүктөлөт), айрым сайттар captcha сурайт. Жообуңуз сакталат; аны Жөндөөлөрдөн өзгөртө аласыз.</string>
+    <string name="torAskNo">Жок</string>
+    <string name="torAskNotice">Бул тармакта эч бир ыкма {host} сайтын ачкан жок. Shroudly аны акыркы жолу — Tor тармагы аркылуу ача алат, бирок бир топ жайыраак. Уруксат берүү же баш тартуу үчүн Shroudly\'ди ачыңыз.</string>
+    <string name="torAskTitle">{host} Tor аркылуу ачылсынбы?</string>
+    <string name="torAskYes">Tor колдонуу</string>
+    <string name="torUsedPhone">{host} Tor тармагы аркылуу гана ачылды — бул Shroudly\'нин акыркы жолу: бул тармакта башка эч нерсе өткөн жок. Бул жайыраак, кээ бир сайттар капча сурайт; башка колдонмолор жана сайттар мурдагыдай иштейт.</string>
+    <string name="torUsedTv">{host} Tor тармагы аркылуу гана ачылды — бул Shroudly\'нин акыркы жолу. Андагы видеолор жай же төмөн сапатта жүктөлүшү мүмкүн; башка колдонмолор мурдагыдай иштейт.</string>
     <string name="totalCount">Бардыгы: {count}</string>
     <string name="updAvailable">{version} версиясы жеткиликтүү</string>
     <string name="updDownload">Жүктөп алып орнотуу</string>
@@ -247,7 +263,7 @@
     <string name="upload">Жөнөтүү</string>
     <string name="uptime">Иштөө убактысы</string>
     <string name="versionLabel">Версия {version}</string>
-    <string name="whatsNewAndroid">Сайттар боюнча туташуулар: Shroudly аркылуу эмне өтөрүн эки багыттагы маалыматы менен көрүп, каалаган сайтты бөгөттөңүз (#74).\nБөгөттөө сайттын туташууларын дароо үзөт; тизме түзмөгүңүздө калат.</string>
+    <string name="whatsNewAndroid">Туташуулар: Shroudly\'нин өзүнө керек аталыштар (анын DNS\'и, Tor, өз сайттары) эми жаңылыштык менен бөгөттөлбөйт.\nShroudly\'ге жазылыңыз: адегенде иштеп чыгуучунун аккаунттары — жаңылыктар жана шашылыш кабарлар ошол жерде.</string>
     <string name="whatsNewOk">Түшүнүктүү</string>
     <string name="whatsNewTitle">{version} версиясындагы жаңылыктар</string>
 </resources>

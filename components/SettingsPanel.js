@@ -562,6 +562,8 @@ function TorPrepare({ t }) {
     return () => { alive = false; clearInterval(timer); };
   }, []);
   if (!st || !window.electron?.prepareTor) return null;
+  // Windows 7 and 8: Tor no longer runs there; said instead of a button.
+  if (st.unsupported) return <p className="m-0 pb-3 text-[12px] leading-snug" style={{ color: 'var(--text-faint)' }}>{t(st.unsupported === 'windows' ? 'lastResortOldWindows' : 'lastResortNoTor')}</p>;
   const busy = st.state === 'downloading';
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
@@ -1167,7 +1169,7 @@ export default function SettingsPanel({ active = false }) {
             {/* The last way out (electron/tor-route.js): on unless turned
                 off; the user's own server, when set, carries everything. */}
             <Toggle label={t('lastResort')}
-                    desc={settings.ownServer ? t('lastResortOwnServer') : t('lastResortDesc')}
+                    desc={settings.ownServer ? t('lastResortOwnServer') : `${t('lastResortDesc')} ${t('lastResortAsks')}`}
                     checked={settings.torLastResort !== false}
                     onChange={(v) => save('torLastResort', v)} />
             {settings.torLastResort !== false && !settings.ownServer && <TorPrepare t={t} />}

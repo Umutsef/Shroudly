@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">Cari atau taip laman untuk disekat</string>
     <string name="connsSystem">digunakan Shroudly</string>
-    <string name="connsSystemConfirm">Shroudly sendiri menggunakan {host}. Menyekatnya boleh merosakkan DNS tersulit, kemas kini atau jalan terakhir, dan laman mungkin berhenti dibuka. Sekat juga?</string>
     <string name="connsTitle">Sambungan mengikut laman</string>
+    <string name="dnsAroundAndroid">Ada perkara lain pada peranti ini yang menjawab carian nama aplikasi (DNS Peribadi atau aplikasi DNS), jadi aplikasi yang disekat mungkin tidak dibuka. Dalam Tetapan → Rangkaian → DNS Peribadi pilih Mati atau Automatik, tutup aplikasi DNS, kemudian mulakan semula Shroudly.</string>
     <string name="dnsErrorEmpty">Taip alamat pelayan, contohnya {example}.</string>
     <string name="dnsErrorHost">Itu bukan alamat IP atau nama pelayan; taip seperti {example}.</string>
     <string name="dnsErrorPort">Port mesti nombor dari 1 hingga 65535.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Aplikasi yang memintas Shroudly</string>
     <string name="excludedAppsCount">Aplikasi yang memintas Shroudly: {count}</string>
     <string name="excludedAppsDesc">Trafiknya keluar terus tanpa melalui Shroudly: contohnya permainan yang tidak memerlukannya.</string>
+    <string name="followCodeshare">Codeshare, pembuat Shroudly</string>
+    <string name="followDesc">Berita tentang sekatan, versi baharu dan cara melepasinya, lebih awal. Mengikuti dan berkongsi ialah cara Shroudly sampai kepada orang yang memerlukannya, dan ia percuma.</string>
+    <string name="followDeveloper">Umut Bayraktar, pembangun Shroudly</string>
+    <string name="followTitle">Ikuti Shroudly</string>
+    <string name="followTv">Buka ini pada telefon atau komputer anda:</string>
     <string name="helpNudgeBodyPhone">Sebuah aplikasi percuma membolehkan orang di negara yang menapis internet menggunakan sedikit sambungan telefon ini untuk melepasi sekatan. Ia selamat untuk anda: mereka tidak boleh sampai ke telefon atau rangkaian anda, dan laman web yang mereka buka tidak pernah melihat alamat anda.</string>
     <string name="helpNudgeShow">Tunjukkan</string>
     <string name="helpNudgeTitle">Bantu orang di negara yang ditapis?</string>
@@ -157,6 +162,7 @@
     <string name="language">Bahasa</string>
     <string name="languageSystem">Lalai sistem</string>
     <string name="lastResort">Apabila tiada yang lain berjaya: rangkaian Tor</string>
+    <string name="lastResortAsks">Shroudly bertanya dahulu sebelum menggunakannya kali pertama.</string>
     <string name="lastResortDesc">Laman yang tidak dapat dibuka oleh sebarang teknik melalui Tor, yang dicapai melalui Snowflake: sambungan sukarelawan, termasuk semua yang menghidupkan “Bantu orang di negara yang ditapis”. Lebih perlahan, dan sesetengah laman meminta captcha daripada pelawat dari Tor. Tor hanya bermula apabila sesebuah laman memerlukannya.</string>
     <string name="lastResortFailed">Rangkaian Tor tidak dapat dicapai; akan dicuba lagi apabila sesebuah laman memerlukannya</string>
     <string name="lastResortOwnServer">Tidak digunakan selagi pelayan anda sendiri ditetapkan: pelayan itu membawa semua laman.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">Menyambung ke rangkaian Tor untuk laman yang tidak terbuka dengan cara lain… {progress}%</string>
     <string name="linkReleases">Nota keluaran</string>
     <string name="linkSourceCode">Kod sumber di GitHub</string>
+    <string name="linkWebsite">Laman web Codeshare</string>
     <string name="madeBy">Produk Codeshare Technology Ltd</string>
     <string name="nationalOnlyBody">Sambungan ke seluruh dunia terputus; laman dalam negara masih terbuka. Tiada aplikasi atau VPN yang dapat melepasinya. Shroudly akan meneruskan sendiri apabila sambungan kembali.</string>
     <string name="nationalOnlyHelp">Apa yang masih boleh membantu</string>
     <string name="nationalOnlyTitle">Hanya rangkaian negara ini yang berfungsi</string>
+    <string name="navFollow">Ikuti</string>
     <string name="navInfo">Perihal</string>
     <string name="navProtection">Perlindungan</string>
     <string name="navSettings">Tetapan</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">ia menjawab, tetapi tiada laman yang melaluinya</string>
     <string name="protected_">Dilindungi</string>
     <string name="protectionStopped">Perlindungan dihentikan</string>
+    <string name="reopenAppsHint">Aplikasi yang sudah dibuka: jika satu tidak bersambung, tutup dan buka semula sekali.</string>
     <string name="searchApps">Cari aplikasi</string>
     <string name="shareApp">Kongsi Shroudly</string>
     <string name="shareAppText">Shroudly {version} untuk Android, untuk membuka laman dan aplikasi yang disekat. Untuk memasangnya, buka fail ini; jika telefon bertanya, benarkan pemasangan aplikasi daripada sumber ini.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Sokong Shroudly</string>
     <string name="tagline">Tidak kelihatan. Tidak terhalang.</string>
     <string name="testing">Menguji…</string>
+    <string name="torAskCard">Tiada teknik yang membuka {host} di rangkaian ini. Shroudly boleh membukanya melalui rangkaian Tor: jauh lebih perlahan (halaman dan video dimuatkan dengan perlahan), dan sesetengah laman meminta captcha. Jawapan anda disimpan; anda boleh mengubahnya dalam Tetapan.</string>
+    <string name="torAskNo">Tidak</string>
+    <string name="torAskNotice">Tiada teknik yang membuka {host} di rangkaian ini. Shroudly boleh membukanya melalui rangkaian Tor, jalan terakhirnya, tetapi jauh lebih perlahan. Buka Shroudly untuk membenarkan atau menolak.</string>
+    <string name="torAskTitle">Buka {host} melalui Tor?</string>
+    <string name="torAskYes">Guna Tor</string>
+    <string name="torUsedPhone">{host} hanya dibuka melalui rangkaian Tor, jalan terakhir Shroudly: tiada cara lain yang berjaya pada rangkaian ini. Ia lebih perlahan dan sesetengah laman meminta captcha; aplikasi dan laman anda yang lain kekal seperti biasa.</string>
+    <string name="torUsedTv">{host} hanya dibuka melalui rangkaian Tor, jalan terakhir Shroudly. Videonya mungkin dimuatkan perlahan atau dengan kualiti lebih rendah; aplikasi anda yang lain kekal seperti biasa.</string>
     <string name="totalCount">Jumlah: {count}</string>
     <string name="updAvailable">Versi {version} tersedia</string>
     <string name="updDownload">Muat turun dan pasang</string>
@@ -247,7 +263,7 @@
     <string name="upload">Muat naik</string>
     <string name="uptime">Masa aktif</string>
     <string name="versionLabel">Versi {version}</string>
-    <string name="whatsNewAndroid">Sambungan mengikut laman: lihat apa yang melalui Shroudly, dengan data kedua-dua arah, dan sekat mana-mana laman (#74).\nMenyekat terus memutuskan sambungan laman itu; senarainya kekal pada peranti anda.</string>
+    <string name="whatsNewAndroid">Sambungan: nama yang diperlukan Shroudly sendiri (DNS, Tor, lamannya sendiri) tidak lagi boleh disekat secara tidak sengaja.\nIkuti Shroudly: akaun pembangun dahulu; berita dan notis segera disiarkan di sana.</string>
     <string name="whatsNewOk">Faham</string>
     <string name="whatsNewTitle">Apa yang baharu dalam {version}</string>
 </resources>

@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">Gözläň ýa-da bloklamak üçin saýt ýazyň</string>
     <string name="connsSystem">Shroudly ulanýar</string>
-    <string name="connsSystemConfirm">Shroudly {host} salgysyny özi ulanýar. Bloklamak şifrlenen DNS-i, täzelenmeleri ýa-da soňky ýoly bozup biler, saýtlar açylmazlygy mümkin. Şonda-da bloklansynmy?</string>
     <string name="connsTitle">Saýtlar boýunça birikmeler</string>
+    <string name="dnsAroundAndroid">Bu enjamda programmalaryň at soraglaryna başga bir zat jogap berýär (Hususy DNS ýa-da DNS programmasy), şonuň üçin petiklenen programmalar açylman biler. Sazlamalar → Tor → Hususy DNS bölüminde «Öçük» ýa-da «Awtomatik» saýlaň, DNS programmalaryny ýapyň, soňra Shroudly-ni täzeden başladyň.</string>
     <string name="dnsErrorEmpty">Serweriň salgysyny ýazyň, meselem {example}.</string>
     <string name="dnsErrorHost">Bu ne IP salgy, ne-de serweriň ady; ony {example} ýaly ýazyň.</string>
     <string name="dnsErrorPort">Port 1-den 65535-e çenli san bolmaly.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Shroudly-dan aýlanyp geçýän programmalar</string>
     <string name="excludedAppsCount">Shroudly-dan aýlanyp geçýän programmalar: {count}</string>
     <string name="excludedAppsDesc">Olaryň trafigi Shroudly-dan geçmän göni çykýar: meselem, oňa mätäç däl oýun.</string>
+    <string name="followCodeshare">Shroudly-ni döredýän Codeshare</string>
+    <string name="followDesc">Petiklemeler, täze wersiýalar we aýlanyp geçmegiň ýollary barada habarlar ilki şu ýerde. Yzarlamak we paýlaşmak Shroudly-niň oňa mätäç adamlara ýetmegine kömek edýär we mugt.</string>
+    <string name="followDeveloper">Shroudly-niň işläp düzüjisi Umut Baýraktar</string>
+    <string name="followTitle">Shroudly-ni yzarla</string>
+    <string name="followTv">Bulary telefonyňyzda ýa-da kompýuteriňizde açyň:</string>
     <string name="helpNudgeBodyPhone">Mugt programma interneti senzura edýän ýurtlardaky adamlara petikleri geçmek üçin bu telefonyň baglanyşygynyň az bölegini ulanmaga mümkinçilik berýär. Siziň üçin howpsuz: olar telefonyňyza ýa-da ulgamyňyza ýetip bilmeýär, açýan saýtlary bolsa siziň salgyňyzy hiç haçan görmeýär.</string>
     <string name="helpNudgeShow">Görkez</string>
     <string name="helpNudgeTitle">Senzuraly ýurtlardaky adamlara kömek etmek isleýärsiňizmi?</string>
@@ -157,6 +162,7 @@
     <string name="language">Dil</string>
     <string name="languageSystem">Ulgamdaky ýaly</string>
     <string name="lastResort">Başga hiç zat işlemese: Tor ulgamy</string>
+    <string name="lastResortAsks">Shroudly ony ilkinji gezek ulanmazdan öň sizden soraýar.</string>
     <string name="lastResortDesc">Hiç bir usulyň açyp bilmedik saýty Tor arkaly açylýar, Tor-a bolsa Snowflake arkaly, ýagny meýletinçileriň birikmeleri arkaly ýetilýär (olaryň arasynda «Senzuraly ýurtlardaky adamlara kömek et» funksiýasyny açanlaryň hemmesi bar). Haýalrak, käbir saýtlar Tor-dan gelenlerden kapça soraýar. Tor diňe bir saýta gerek bolanda işe başlaýar.</string>
     <string name="lastResortFailed">Tor ulgamyna ýetip bolmady; bir saýta gerek bolanda täzeden synanyşar</string>
     <string name="lastResortOwnServer">Öz serweriňiz goýlan wagty ulanylmaýar: ähli saýtlar şol serwer arkaly geçýär.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">Başga ýol bilen açylmaýan saýtlar üçin Tor ulgamyna birikýär… {progress}%</string>
     <string name="linkReleases">Wersiýa bellikleri</string>
     <string name="linkSourceCode">GitHub-daky çeşme kody</string>
+    <string name="linkWebsite">Codeshare web sahypasy</string>
     <string name="madeBy">Codeshare Technology Ltd önümi</string>
     <string name="nationalOnlyBody">Dünýäniň galan bölegi bilen baglanyşyk kesildi; ýurduň içindäki saýtlar entek açylýar. Muny hiç bir programma ýa-da VPN aýlanyp geçip bilmez. Baglanyşyk gaýdyp gelende Shroudly özi dowam edýär.</string>
     <string name="nationalOnlyHelp">Ýene näme kömek edip biler</string>
     <string name="nationalOnlyTitle">Diňe şu ýurduň tory işleýär</string>
+    <string name="navFollow">Yzarla</string>
     <string name="navInfo">Maglumat</string>
     <string name="navProtection">Gorag</string>
     <string name="navSettings">Sazlamalar</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">ol jogap berýär, ýöne onuň üsti bilen hiç bir saýt gelmedi</string>
     <string name="protected_">Goragly</string>
     <string name="protectionStopped">Gorag togtadyldy</string>
+    <string name="reopenAppsHint">Öň açyk duran programmalar: biri birikmese, ony ýapyp, bir gezek täzeden açyň.</string>
     <string name="searchApps">Programma gözle</string>
     <string name="shareApp">Shroudly-ni paýlaş</string>
     <string name="shareAppText">Petiklenen saýtlary we programmalary açmak üçin Android üçin Shroudly {version}. Gurmak üçin şu faýly açyň; telefon sorasa, şu çeşmeden programma gurmaga rugsat beriň.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Shroudly-ni goldamak</string>
     <string name="tagline">Görünmez. Saklanmaz.</string>
     <string name="testing">Barlanýar…</string>
+    <string name="torAskCard">Bu ulgamda hiç bir usul {host} saýtyny açmady. Shroudly ony Tor ulgamy arkaly açyp biler: has haýal (sahypalar we wideolar haýal ýüklenýär), käbir saýtlar captcha soraýar. Jogabyňyz ýatda saklanýar; ony Sazlamalarda üýtgedip bilersiňiz.</string>
+    <string name="torAskNo">Ýok</string>
+    <string name="torAskNotice">Bu ulgamda hiç bir usul {host} saýtyny açmady. Shroudly ony iň soňky ýoly bolan Tor ulgamy arkaly açyp biler, ýöne has haýal. Rugsat bermek ýa-da ret etmek üçin Shroudly-ni açyň.</string>
+    <string name="torAskTitle">{host} Tor arkaly açylsynmy?</string>
+    <string name="torAskYes">Tor ulan</string>
+    <string name="torUsedPhone">{host} diňe Tor tory arkaly açyldy — bu Shroudly-niň iň soňky ýoly: bu torda başga hiç zat geçmedi. Bu haýalrak, käbir saýtlar kapça soraýar; beýleki programmalaryňyz we saýtlar öňküsi ýaly işleýär.</string>
+    <string name="torUsedTv">{host} diňe Tor tory arkaly açyldy — bu Shroudly-niň iň soňky ýoly. Ondaky wideolar haýal ýa-da pes hilde ýüklenip biler; beýleki programmalaryňyz öňküsi ýaly işleýär.</string>
     <string name="totalCount">Jemi: {count}</string>
     <string name="updAvailable">{version} wersiýasy elýeterli</string>
     <string name="updDownload">Ýükläp alyň we gurnaň</string>
@@ -247,7 +263,7 @@
     <string name="upload">Iberiş</string>
     <string name="uptime">Işlän wagty</string>
     <string name="versionLabel">Wersiýa {version}</string>
-    <string name="whatsNewAndroid">Saýtlar boýunça birikmeler: Shroudly arkaly näme geçýändigini iki ugurdaky maglumaty bilen görüň we islän saýtyňyzy bloklaň (#74).\nBloklamak saýtyň birikmelerini derrew kesýär; sanaw enjamyňyzda galýar.</string>
+    <string name="whatsNewAndroid">Baglanyşyklar: Shroudly-niň özüne gerek atlar (DNS-i, Tor, öz saýtlary) indi ýalňyşlykda petiklenmeýär.\nShroudly-ni yzarlaň: ilki öndürijiniň hasaplary — habarlar we gyssagly bildirişler şol ýerde paýlaşylýar.</string>
     <string name="whatsNewOk">Düşnükli</string>
     <string name="whatsNewTitle">{version} wersiýasynda täzelikler</string>
 </resources>

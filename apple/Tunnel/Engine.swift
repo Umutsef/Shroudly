@@ -38,7 +38,11 @@ final class Engine {
     var onUpstreamDown: ((String?) -> Void)?
     /* The last way out (--fallback-file, TorRoute): a name it carried (true,
      * the name), or nothing listening there (false, the engine's why). */
-    var onFallback: ((Bool, String) -> Void)?
+    var onFallback: ((Bool, String, String) -> Void)?
+    /* Apps' lookups go around the tunnel (a DNS profile or app): their
+     * connections keep coming by address, none by name (dns_way in
+     * core/src/engine.c). Once a run, naming a site. */
+    var onDnsAround: ((String) -> Void)?
     /* The engine's verdict on a fetched ad list (ADBLOCK-CHECK): ok, error. */
     var onAdblockCheck: ((Bool, String?) -> Void)?
     private(set) var lastError: String?
@@ -213,10 +217,13 @@ final class Engine {
             let why = obj["why"] as? String
             log("engine: own server: \(why ?? "?")")
             onUpstreamDown?(why)
+        case "dns_around":
+            log("engine: \(line)")
+            onDnsAround?(obj["host"] as? String ?? "")
         case "fallback":
             let ok = (obj["ok"] as? NSNumber)?.intValue == 1
             if ok { logSite("engine: \(line)") } else { log("engine: last way out: \(obj["why"] as? String ?? "?")") }
-            onFallback?(ok, ok ? (obj["host"] as? String ?? "") : (obj["why"] as? String ?? ""))
+            onFallback?(ok, ok ? (obj["host"] as? String ?? "") : (obj["why"] as? String ?? ""), obj["host"] as? String ?? "")
         default:
             // Events about one site (bypass, blocked, seen...) name it.
             logSite("engine: \(line)")

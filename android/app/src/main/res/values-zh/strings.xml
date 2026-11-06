@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">搜索,或输入要屏蔽的网站</string>
     <string name="connsSystem">Shroudly 使用</string>
-    <string name="connsSystemConfirm">Shroudly 本身在使用 {host}。屏蔽它可能导致加密 DNS、更新或最后的通道失效,网站可能打不开。仍要屏蔽吗?</string>
     <string name="connsTitle">按网站的连接</string>
+    <string name="dnsAroundAndroid">此设备上有其他东西在回答应用的域名查询（私人 DNS 或 DNS 应用），因此被封锁的应用可能打不开。请在 设置 → 网络 → 私人 DNS 中选择“关闭”或“自动”，关闭 DNS 应用，然后重新启动 Shroudly。</string>
     <string name="dnsErrorEmpty">请输入服务器地址，例如 {example}。</string>
     <string name="dnsErrorHost">这既不是 IP 地址也不是服务器名称；请按 {example} 的格式输入。</string>
     <string name="dnsErrorPort">端口必须是 1 到 65535 之间的数字。</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">绕过 Shroudly 的应用</string>
     <string name="excludedAppsCount">绕过 Shroudly 的应用：{count}</string>
     <string name="excludedAppsDesc">它们的流量直接出去，不经过 Shroudly：例如不需要它的游戏。</string>
+    <string name="followCodeshare">Codeshare，Shroudly 的开发团队</string>
+    <string name="followDesc">封锁消息、新版本和绕过的方法，第一时间知道。关注和分享能让 Shroudly 找到需要它的人，而且不花一分钱。</string>
+    <string name="followDeveloper">Umut Bayraktar，Shroudly 的开发者</string>
+    <string name="followTitle">关注 Shroudly</string>
+    <string name="followTv">请在手机或电脑上打开：</string>
     <string name="helpNudgeBodyPhone">一个免费应用可以让互联网受审查国家的人们借用这部手机的一小部分网络连接来绕过封锁。这对你是安全的：他们无法访问你的手机或网络，他们打开的网站也永远看不到你的地址。</string>
     <string name="helpNudgeShow">查看</string>
     <string name="helpNudgeTitle">愿意帮助受审查国家的人们吗？</string>
@@ -157,6 +162,7 @@
     <string name="language">语言</string>
     <string name="languageSystem">跟随系统</string>
     <string name="lastResort">其他方法都无效时:Tor 网络</string>
+    <string name="lastResortAsks">Shroudly 首次使用它之前会先问你。</string>
     <string name="lastResortDesc">任何技术都打不开的网站会经由 Tor 打开,而 Tor 通过 Snowflake 连接:也就是志愿者的连接,其中包括所有开启了“帮助受审查国家的人”的用户。速度较慢,有些网站会要求来自 Tor 的访客完成验证码。只有当某个网站需要时,Tor 才会启动。</string>
     <string name="lastResortFailed">无法连接 Tor 网络;等有网站需要时会再试</string>
     <string name="lastResortOwnServer">设置了你自己的服务器时不使用:所有网站都经由该服务器。</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">正在为其他方法打不开的网站连接 Tor 网络… {progress}%</string>
     <string name="linkReleases">版本说明</string>
     <string name="linkSourceCode">GitHub 上的源代码</string>
+    <string name="linkWebsite">Codeshare 网站</string>
     <string name="madeBy">Codeshare Technology Ltd 出品</string>
     <string name="nationalOnlyBody">与世界其他地区的连接已被切断；国内网站仍可打开。任何应用或 VPN 都无法绕过。连接恢复后，Shroudly 会自动继续。</string>
     <string name="nationalOnlyHelp">还有什么能帮上忙</string>
     <string name="nationalOnlyTitle">只有本国网络可用</string>
+    <string name="navFollow">关注</string>
     <string name="navInfo">关于</string>
     <string name="navProtection">保护</string>
     <string name="navSettings">设置</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">它有响应，但没有网站能通过它打开</string>
     <string name="protected_">已受保护</string>
     <string name="protectionStopped">保护已停止</string>
+    <string name="reopenAppsHint">之前已经打开的应用：如果有一个连不上，请关闭后重新打开一次。</string>
     <string name="searchApps">搜索应用</string>
     <string name="shareApp">分享 Shroudly</string>
     <string name="shareAppText">Shroudly {version} Android 版，用于打开被封锁的网站和应用。安装时打开此文件；如果手机询问，请允许安装来自此来源的应用。</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">支持 Shroudly</string>
     <string name="tagline">隐形。不可阻挡。</string>
     <string name="testing">正在测试…</string>
+    <string name="torAskCard">在此网络上，没有任何技术能打开 {host}。Shroudly 可以通过 Tor 网络打开它：慢很多（网页和视频加载缓慢），部分网站会要求验证码。你的回答会被记住；可在设置中更改。</string>
+    <string name="torAskNo">不</string>
+    <string name="torAskNotice">在此网络上，没有任何技术能打开 {host}。Shroudly 可以通过 Tor 网络（它的最后手段）打开它，但会慢很多。打开 Shroudly 以允许或拒绝。</string>
+    <string name="torAskTitle">通过 Tor 打开 {host}？</string>
+    <string name="torAskYes">使用 Tor</string>
+    <string name="torUsedPhone">{host} 只能通过 Tor 网络打开，这是 Shroudly 的最后一招：在这个网络上其他方法都不行。速度较慢，有些网站会要求验证码；你的其他应用和网站照常。</string>
+    <string name="torUsedTv">{host} 只能通过 Tor 网络打开，这是 Shroudly 的最后一招。它的视频可能加载较慢或画质较低；你的其他应用照常。</string>
     <string name="totalCount">总计：{count}</string>
     <string name="updAvailable">版本 {version} 现已可用</string>
     <string name="updDownload">下载并安装</string>
@@ -247,7 +263,7 @@
     <string name="upload">上传</string>
     <string name="uptime">运行时长</string>
     <string name="versionLabel">版本 {version}</string>
-    <string name="whatsNewAndroid">按网站的连接:查看经过 Shroudly 的内容及双向数据量,并屏蔽任意网站 (#74)。\n屏蔽会立即断开该网站的连接;列表保存在你的设备上。</string>
+    <string name="whatsNewAndroid">连接：Shroudly 自身需要的地址（它的 DNS、Tor、自己的网站）不会再被误封。\n关注 Shroudly：开发者的账号排在前面，新闻和紧急通知都在那里发布。</string>
     <string name="whatsNewOk">知道了</string>
     <string name="whatsNewTitle">{version} 的新内容</string>
 </resources>

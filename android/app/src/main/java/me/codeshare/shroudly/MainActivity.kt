@@ -189,6 +189,7 @@ class MainActivity : Activity() {
         findViewById<TextView>(R.id.version).text = text(R.string.versionLabel, "version" to BuildConfig.VERSION_NAME)
         findViewById<View>(R.id.notices).setOnClickListener { showNotices() }
         findViewById<View>(R.id.privacy).setOnClickListener { open(UpdateCheck.PRIVACY_URL) }
+        findViewById<View>(R.id.website).setOnClickListener { open("https://codeshare.me") }
         findViewById<View>(R.id.shareLogs).setOnClickListener { shareLogs() }
         findViewById<View>(R.id.helpOthers).setOnClickListener { showHelpOthers() }
         // "Share Shroudly": the APK to another phone, where there is one file to pass on.
@@ -209,7 +210,22 @@ class MainActivity : Activity() {
             notice.visibility = View.GONE
         }
         findViewById<View>(R.id.updateOpen).setOnClickListener { updateApk() }
+        // A site needs Tor (TorAsk, issue #77): yes starts it and is kept; no
+        // turns the last way out off (Settings turns it on again).
+        findViewById<View>(R.id.torAskYes).setOnClickListener {
+            TorRoute.setApproved(this, true)
+            TorAsk.clear(this)
+            Protector.tell(this, ShroudlyVpnService.ACTION_SETTINGS, "torYes")
+            render()
+        }
+        findViewById<View>(R.id.torAskNo).setOnClickListener {
+            TorRoute.setEnabled(this, false)
+            TorAsk.clear(this)
+            Protector.tell(this, ShroudlyVpnService.ACTION_SETTINGS, "torLastResort")
+            render()
+        }
         findViewById<View>(R.id.supportRow).setOnClickListener { openSupport() }
+        findViewById<View>(R.id.followRow).setOnClickListener { startActivity(android.content.Intent(this, FollowActivity::class.java)) }
         findViewById<View>(R.id.supportOpen).setOnClickListener { openSupport() }
         findViewById<View>(R.id.supportLater).setOnClickListener {
             Support.rest(this)
@@ -602,6 +618,15 @@ class MainActivity : Activity() {
         // Proxy only on, and no network's proxy set to it: only apps with a
         // proxy setting of their own go through it, so not "Protected".
         val proxyIdle = on && Protection.proxyOnly && proxySet == false
+        // A site needs Tor and the user has not said yes yet (TorAsk, issue
+        // #77): the question stays here until it is answered.
+        val torAsk = if (on && Protection.ownServerDown == null) Protection.torAsk else null
+        findViewById<View>(R.id.torAskCard).visibility = if (torAsk != null) View.VISIBLE else View.GONE
+        if (torAsk != null) {
+            val h = torAsk.ifEmpty { "…" }
+            findViewById<TextView>(R.id.torAskTitle).text = text(R.string.torAskTitle, "host" to h)
+            findViewById<TextView>(R.id.torAskText).text = text(R.string.torAskCard, "host" to h)
+        }
 
         val statusText = getString(
             when (st) {
@@ -699,6 +724,18 @@ class MainActivity : Activity() {
             // (issue #66), so no site has to be opened to check.
             on && !proxyIdle && Protection.ownServerExit != null -> {
                 detail.show(text(R.string.ownServerExit, "ip" to (Protection.ownServerExit ?: "")))
+                detail.setTextColor(getColor(R.color.text_dim))
+            }
+            // Apps' lookups go around the tunnel (DnsNotice): what to turn off.
+            on && !proxyIdle && !Protection.proxyOnly && Protection.dnsAround -> {
+                detail.show(getString(R.string.dnsAroundAndroid))
+                detail.setTextColor(getColor(R.color.warn))
+            }
+            // Just started: an app that was open before may hold its old
+            // connections; said for the first two minutes.
+            on && !proxyIdle && !Protection.proxyOnly && Protection.startedAt > 0 &&
+                android.os.SystemClock.elapsedRealtime() - Protection.startedAt < 120_000 -> {
+                detail.show(getString(R.string.reopenAppsHint))
                 detail.setTextColor(getColor(R.color.text_dim))
             }
             // The last way out (TorRoute) at work: connecting, carrying sites

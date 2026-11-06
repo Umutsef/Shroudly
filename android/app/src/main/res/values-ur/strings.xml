@@ -121,8 +121,8 @@
     <string name="connsRouteTor">ٹور</string>
     <string name="connsSearch">تلاش کریں یا بلاک کرنے کے لیے سائٹ لکھیں</string>
     <string name="connsSystem">Shroudly استعمال کرتا ہے</string>
-    <string name="connsSystemConfirm">Shroudly خود {host} استعمال کرتا ہے۔ اسے بلاک کرنے سے خفیہ کردہ DNS، اپ ڈیٹس یا آخری راستہ خراب ہو سکتا ہے اور سائٹیں کھلنا بند ہو سکتی ہیں۔ پھر بھی بلاک کریں؟</string>
     <string name="connsTitle">سائٹ کے لحاظ سے کنکشن</string>
+    <string name="dnsAroundAndroid">اس ڈیوائس پر ایپس کی نام کی تلاش کا جواب کوئی اور دے رہا ہے (پرائیویٹ DNS یا کوئی DNS ایپ)، اس لیے بلاک ایپس شاید نہ کھلیں۔ سیٹنگز ← نیٹ ورک ← پرائیویٹ DNS میں «آف» یا «خودکار» چنیں، DNS ایپس بند کریں، پھر Shroudly دوبارہ شروع کریں۔</string>
     <string name="dnsErrorEmpty">سرور کا پتا لکھیں، جیسے {example}۔</string>
     <string name="dnsErrorHost">یہ نہ IP پتا ہے نہ سرور کا نام؛ اسے {example} کی طرح لکھیں۔</string>
     <string name="dnsErrorPort">پورٹ 1 سے 65535 تک کا کوئی عدد ہونا چاہیے۔</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">وہ ایپس جو Shroudly سے نہیں گزرتیں</string>
     <string name="excludedAppsCount">وہ ایپس جو Shroudly سے نہیں گزرتیں: {count}</string>
     <string name="excludedAppsDesc">ان کی ٹریفک Shroudly سے گزرے بغیر سیدھی باہر جاتی ہے: مثلاً کوئی گیم جسے اس کی ضرورت نہیں۔</string>
+    <string name="followCodeshare">Codeshare، جو Shroudly بناتے ہیں</string>
+    <string name="followDesc">پابندیوں، نئے ورژنز اور گزرنے کے طریقوں کی خبریں سب سے پہلے۔ فالو اور شیئر کرنا ہی Shroudly کو ضرورت مندوں تک پہنچاتا ہے، اور اس پر کچھ خرچ نہیں ہوتا۔</string>
+    <string name="followDeveloper">اُمت بیرقدار، Shroudly کے ڈویلپر</string>
+    <string name="followTitle">Shroudly کو فالو کریں</string>
+    <string name="followTv">انہیں اپنے فون یا کمپیوٹر پر کھولیں:</string>
     <string name="helpNudgeBodyPhone">ایک مفت ایپ سنسر والے ملکوں کے لوگوں کو پابندیوں سے گزرنے کے لیے اس فون کے کنکشن کا تھوڑا سا حصہ استعمال کرنے دیتی ہے۔ یہ آپ کے لیے محفوظ ہے: وہ آپ کے فون یا نیٹ ورک تک نہیں پہنچ سکتے، اور جو سائٹس وہ کھولتے ہیں وہ کبھی آپ کا پتہ نہیں دیکھتیں۔</string>
     <string name="helpNudgeShow">دکھائیں</string>
     <string name="helpNudgeTitle">سنسر والے ملکوں کے لوگوں کی مدد کریں؟</string>
@@ -157,6 +162,7 @@
     <string name="language">زبان</string>
     <string name="languageSystem">سسٹم کی ڈیفالٹ</string>
     <string name="lastResort">جب کچھ اور کام نہ کرے: ٹور نیٹ ورک</string>
+    <string name="lastResortAsks">Shroudly پہلی بار استعمال کرنے سے پہلے آپ سے پوچھتا ہے۔</string>
     <string name="lastResortDesc">جو سائٹ کوئی تکنیک نہیں کھول پاتی وہ ٹور کے ذریعے کھلتی ہے، اور ٹور تک اسنو فلیک کے ذریعے پہنچا جاتا ہے: رضاکاروں کے کنکشن، جن میں وہ سب شامل ہیں جنہوں نے «سنسر شدہ ممالک کے لوگوں کی مدد کریں» آن کیا ہے۔ یہ سست ہے، اور کچھ سائٹیں ٹور سے آنے والوں سے کیپچا مانگتی ہیں۔ ٹور صرف تب شروع ہوتا ہے جب کسی سائٹ کو اس کی ضرورت ہو۔</string>
     <string name="lastResortFailed">ٹور نیٹ ورک تک نہیں پہنچ سکے؛ جب کسی سائٹ کو ضرورت ہوگی تو دوبارہ کوشش ہوگی</string>
     <string name="lastResortOwnServer">جب تک آپ کا اپنا سرور سیٹ ہے، یہ استعمال نہیں ہوتا: ہر سائٹ اسی سرور سے گزرتی ہے۔</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">جو سائٹیں کسی اور طرح نہیں کھلتیں ان کے لیے ٹور نیٹ ورک سے جڑ رہا ہے… ‎{progress}%</string>
     <string name="linkReleases">ریلیز نوٹس</string>
     <string name="linkSourceCode">GitHub پر سورس کوڈ</string>
+    <string name="linkWebsite">Codeshare ویب سائٹ</string>
     <string name="madeBy">Codeshare Technology Ltd کی ایک پروڈکٹ</string>
     <string name="nationalOnlyBody">باقی دنیا سے رابطہ کٹا ہوا ہے؛ ملک کے اندر کی سائٹس اب بھی کھلتی ہیں۔ کوئی ایپ یا VPN اس سے آگے نہیں جا سکتا۔ رابطہ واپس آنے پر Shroudly خود جاری رکھے گا۔</string>
     <string name="nationalOnlyHelp">اب بھی کیا مدد کر سکتا ہے</string>
     <string name="nationalOnlyTitle">صرف اس ملک کا نیٹ ورک چل رہا ہے</string>
+    <string name="navFollow">فالو</string>
     <string name="navInfo">تعارف</string>
     <string name="navProtection">تحفظ</string>
     <string name="navSettings">ترتیبات</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">یہ جواب دیتا ہے، لیکن اس کے ذریعے کوئی سائٹ نہیں کھلی</string>
     <string name="protected_">محفوظ</string>
     <string name="protectionStopped">تحفظ بند ہو گیا</string>
+    <string name="reopenAppsHint">جو ایپس پہلے سے کھلی تھیں: اگر کوئی کنیکٹ نہ ہو تو اسے بند کر کے ایک بار دوبارہ کھولیں۔</string>
     <string name="searchApps">ایپس تلاش کریں</string>
     <string name="shareApp">Shroudly شیئر کریں</string>
     <string name="shareAppText">بلاک شدہ سائٹیں اور ایپس کھولنے کے لیے Android کے لیے Shroudly {version}۔ انسٹال کرنے کے لیے یہ فائل کھولیں؛ اگر فون پوچھے تو اس ذریعے سے ایپس انسٹال کرنے کی اجازت دیں۔</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Shroudly کی مدد کریں</string>
     <string name="tagline">غیر مرئی۔ ناقابلِ تسخیر۔</string>
     <string name="testing">جانچ ہو رہی ہے…</string>
+    <string name="torAskCard">اس نیٹ ورک پر کسی بھی تکنیک نے {host} نہیں کھولا۔ Shroudly اسے Tor نیٹ ورک کے ذریعے کھول سکتا ہے: بہت آہستہ (صفحات اور ویڈیوز آہستہ لوڈ ہوتے ہیں)، اور کچھ سائٹس captcha مانگتی ہیں۔ آپ کا جواب محفوظ رہتا ہے؛ آپ اسے ترتیبات میں بدل سکتے ہیں۔</string>
+    <string name="torAskNo">نہیں</string>
+    <string name="torAskNotice">اس نیٹ ورک پر کسی بھی تکنیک نے {host} نہیں کھولا۔ Shroudly اسے Tor نیٹ ورک کے ذریعے کھول سکتا ہے، جو اس کا آخری راستہ ہے، مگر بہت آہستہ۔ اجازت دینے یا انکار کرنے کے لیے Shroudly کھولیں۔</string>
+    <string name="torAskTitle">کیا {host} کو Tor کے ذریعے کھولا جائے؟</string>
+    <string name="torAskYes">Tor استعمال کریں</string>
+    <string name="torUsedPhone">{host} صرف Tor نیٹ ورک کے ذریعے کھلا، جو Shroudly کا آخری راستہ ہے: اس نیٹ ورک پر اور کچھ کام نہیں آیا۔ یہ سست ہے اور کچھ سائٹس کیپچا مانگتی ہیں؛ آپ کی باقی ایپس اور سائٹس پہلے کی طرح چلتی ہیں۔</string>
+    <string name="torUsedTv">{host} صرف Tor نیٹ ورک کے ذریعے کھلا، جو Shroudly کا آخری راستہ ہے۔ اس کی ویڈیوز آہستہ یا کم معیار میں لوڈ ہو سکتی ہیں؛ آپ کی باقی ایپس پہلے کی طرح چلتی ہیں۔</string>
     <string name="totalCount">کل: {count}</string>
     <string name="updAvailable">ورژن {version} دستیاب ہے</string>
     <string name="updDownload">ڈاؤن لوڈ اور انسٹال کریں</string>
@@ -247,7 +263,7 @@
     <string name="upload">اپ لوڈ</string>
     <string name="uptime">چلنے کا دورانیہ</string>
     <string name="versionLabel">ورژن {version}</string>
-    <string name="whatsNewAndroid">سائٹ کے لحاظ سے کنکشن: دیکھیں Shroudly سے کیا گزر رہا ہے، دونوں سمتوں کے ڈیٹا کے ساتھ، اور کوئی بھی سائٹ بلاک کریں (#74)۔\nبلاک کرنے سے سائٹ کے کنکشن فوراً ختم ہو جاتے ہیں؛ فہرست آپ کی ڈیوائس پر رہتی ہے۔</string>
+    <string name="whatsNewAndroid">کنکشنز: وہ نام جن کی Shroudly کو خود ضرورت ہے (اس کا DNS، Tor، اس کی اپنی سائٹس) اب غلطی سے بلاک نہیں ہو سکتے۔\nShroudly کو فالو کریں: پہلے ڈیولپر کے اکاؤنٹس؛ خبریں اور فوری اطلاعات وہیں شائع ہوتی ہیں۔</string>
     <string name="whatsNewOk">سمجھ گیا</string>
     <string name="whatsNewTitle">{version} میں نیا کیا ہے</string>
 </resources>

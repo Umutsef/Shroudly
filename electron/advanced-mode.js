@@ -47,7 +47,7 @@ const STOP_TIMEOUT_MS = 4000;
 // see one every second for hours.
 const ALIVE_CHECK_MS = 5000;
 
-function archKey() { return process.arch === 'arm64' ? 'arm64' : 'x64'; }
+function archKey() { return process.arch === 'arm64' ? 'arm64' : process.arch === 'ia32' ? 'ia32' : process.arch === 'arm' ? 'armv7l' : 'x64'; }
 
 /* The machine's own processor, not this build's: the x64 build runs on
  * Windows on ARM too (emulated), where process.arch says x64 but the WinDivert
@@ -114,7 +114,7 @@ function noexec(dir, mounts = null) {
 
 const REASONS = {
   mac_unsupported: 'Advanced mode is not available on macOS: the system offers no packet-divert interface without a signed Network Extension. The default engine still works.',
-  arch_unsupported: 'Advanced mode is not available on this processor architecture (the WinDivert driver has no ARM64 build).',
+  arch_unsupported: 'Advanced mode is not available on this processor (Windows: the WinDivert driver is 64-bit Intel/AMD only; Linux: 64-bit processors only).',
   platform_unsupported: `Advanced mode is not available on ${process.platform}.`,
   not_built: 'The advanced engine is not included in this build. Run: npm run build:core:advanced',
   windivert_missing: 'WinDivert.dll / WinDivert64.sys are missing next to the advanced engine. Reinstall Shroudly.',
@@ -314,6 +314,8 @@ class AdvancedMode {
     if (this.platform === 'darwin') return 'mac_unsupported';
     if (this.platform !== 'win32' && this.platform !== 'linux') return 'platform_unsupported';
     if (this.platform === 'win32' && (archKey() !== 'x64' || windowsHostIsArm())) return 'arch_unsupported';
+    // Linux: its packet engine is built for 64-bit processors (x64, ARM64).
+    if (this.platform === 'linux' && archKey() !== 'x64' && archKey() !== 'arm64') return 'arch_unsupported';
     if (this.packaged) return this._badFile() ? 'files_missing' : null;
     if (!fs.existsSync(advBinaryPath())) return 'not_built';
     if (this.platform === 'win32') {
@@ -341,6 +343,12 @@ class AdvancedMode {
     // The last error that carries Windows' own code (core/src/raw_windows.c):
     // what SecurityBlock.classifyWinDivert reads.
     let fault = null;
+    // A "WinDivert" service another program left behind (raw_windows.c
+    // repair_stale_service): 1 removed, 0 none to remove, null not looked at.
+    let stale = null;
+    // The driver started from its copy in Common Files\Shroudly (use_system_copy):
+    // 1 it did, 0 it could not, null not tried.
+    let copy = null;
     for (const raw of text.split(/\r?\n/)) {
       const line = raw.trim();
       if (!line) continue;
@@ -348,13 +356,15 @@ class AdvancedMode {
         const m = JSON.parse(line);
         if (m.type === 'raw_ready') ready = m;
         else if (m.type === 'stopped') stopped = true;
+        else if (m.type === 'driver' && m.stale != null) stale = Math.max(stale || 0, Number(m.stale) === 1 ? 1 : 0);
+        else if (m.type === 'driver' && m.copy != null) copy = Number(m.copy) === 1 ? 1 : 0;
         else if (m.type === 'error') {
           if (m.msg) errors.push(m.msg);
           if (m.code && Number.isFinite(Number(m.win32))) fault = { code: String(m.code), win32: Number(m.win32) };
         }
       } catch { errors.push(line); }
     }
-    return { ready, stopped, errors, fault };
+    return { ready, stopped, errors, fault, stale, copy };
   }
 
   /* The engine ended before it was ready: why, as an AdvError. A WinDivert
@@ -366,7 +376,7 @@ class AdvancedMode {
     const c = SecurityBlock.classifyWinDivert(s.fault);
     // "Not found" from Windows while every file is there is no antivirus
     // taking them (#69): said as what it is, with Windows' code.
-    if (c && c.code === 'files_missing' && !this._badFile()) return this._notFound(s.fault);
+    if (c && c.code === 'files_missing' && !this._badFile()) return this._notFound(s.fault, s.stale, s.copy);
     if (c && (c.code === 'security_blocked' || c.code === 'files_missing')) {
       const load = s.fault.code === 'windivert_load';
       return this._blockError(c.code, c.kind, {
@@ -381,10 +391,16 @@ class AdvancedMode {
 
   /* Windows said "not found" (2, 3, 126) or "not a program" (193) about
    * WinDivert while its files are all in place and readable. */
-  _notFound(fault) {
+  _notFound(fault, stale = null, copy = null) {
     const load = fault.code === 'windivert_load';
     const what = load ? 'load WinDivert.dll' : 'start the WinDivert driver';
-    return new AdvError('start_failed', `Windows could not ${what} (error ${fault.win32}) although Advanced mode's files are all in place. Restart Windows, then try again; if it stays so, please send the log (Logs → Save logs).`);
+    const tried = [];
+    if (stale === 1) tried.push('a WinDivert service left behind was removed');
+    else if (stale === 0) tried.push('no WinDivert service left behind was found');
+    if (copy === 1) tried.push("the driver was copied to Common Files\\Shroudly and started from there");
+    else if (copy === 0) tried.push('the driver could not be copied to Common Files\\Shroudly');
+    const left = tried.length ? ` (${tried.join('; ')})` : '';
+    return new AdvError('start_failed', `Windows could not ${what} (error ${fault.win32}) although Advanced mode's files are all in place${left}. Restart Windows, then try again; if it stays so, please send the log (Logs → Save logs).`);
   }
 
   async _launchWindows(bin, args) {
@@ -524,6 +540,9 @@ class AdvancedMode {
       else await this._launchLinux(advBinaryPath(), args);
       const ready = await this._waitReady();
       this.active = true;
+      const fixedBy = this._readStatus();
+      if (fixedBy.stale === 1) this.log('info', 'Advanced mode: a WinDivert service that could not start (left behind by another program, or by an earlier try) was removed, so Shroudly\'s own driver could start');
+      if (fixedBy.copy === 1) this.log('info', 'Advanced mode: Windows could not load the driver from Shroudly\'s folder, so it now starts from a copy in Common Files\\Shroudly');
       this.log('success', `Advanced backend active (fake TTL ${ready.ttl})`);
       // The engine takes only the first datagrams of a call where the
       // system's packet filter can look inside them (udpdpi.h); where it

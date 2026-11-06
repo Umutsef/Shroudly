@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">検索、またはブロックするサイトを入力</string>
     <string name="connsSystem">Shroudly が使用</string>
-    <string name="connsSystemConfirm">{host} は Shroudly 自身が使っています。ブロックすると暗号化 DNS、更新、最後の手段が使えなくなり、サイトが開かなくなるおそれがあります。それでもブロックしますか?</string>
     <string name="connsTitle">サイト別の接続</string>
+    <string name="dnsAroundAndroid">このデバイスでは、アプリの名前の問い合わせに別のもの（プライベート DNS や DNS アプリ）が答えているため、ブロックされたアプリが開かないことがあります。設定 → ネットワーク → プライベート DNS で「オフ」か「自動」を選び、DNS アプリを閉じてから Shroudly を起動し直してください。</string>
     <string name="dnsErrorEmpty">サーバーのアドレスを入力してください（例: {example}）。</string>
     <string name="dnsErrorHost">IP アドレスでもサーバー名でもありません。{example} のように入力してください。</string>
     <string name="dnsErrorPort">ポートは 1 から 65535 までの数字にしてください。</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Shroudly を通さないアプリ</string>
     <string name="excludedAppsCount">Shroudly を通さないアプリ：{count}</string>
     <string name="excludedAppsDesc">これらのアプリの通信は Shroudly を通らず直接出ていきます（例: 不要なゲームなど）。</string>
+    <string name="followCodeshare">Shroudly を作っている Codeshare</string>
+    <string name="followDesc">ブロック、新しいバージョン、通り抜ける方法のニュースをいち早く。フォローとシェアが、Shroudly を必要としている人に届ける方法で、費用は一切かかりません。</string>
+    <string name="followDeveloper">Shroudly の開発者 Umut Bayraktar</string>
+    <string name="followTitle">Shroudly をフォロー</string>
+    <string name="followTv">スマートフォンやパソコンで開いてください：</string>
     <string name="helpNudgeBodyPhone">無料のアプリを使うと、インターネットが検閲されている国の人々が、この電話の接続をほんの少し使ってブロックを回避できます。あなたにとって安全です：相手はあなたの電話やネットワークに入れず、相手が開くサイトにあなたのアドレスが見えることもありません。</string>
     <string name="helpNudgeShow">見る</string>
     <string name="helpNudgeTitle">検閲のある国の人々を助けませんか？</string>
@@ -157,6 +162,7 @@
     <string name="language">言語</string>
     <string name="languageSystem">システムの既定</string>
     <string name="lastResort">ほかに何も効かないとき: Tor ネットワーク</string>
+    <string name="lastResortAsks">初めて使う前に Shroudly が確認します。</string>
     <string name="lastResortDesc">どの手法でも開けないサイトは Tor を通ります。Tor には Snowflake、つまりボランティアの接続を通じてつながります(「検閲されている国の人を助ける」をオンにした人たちもその一部です)。速度は遅く、Tor から来た訪問者に CAPTCHA を求めるサイトもあります。Tor はサイトが必要としたときだけ起動します。</string>
     <string name="lastResortFailed">Tor ネットワークに接続できませんでした。サイトが必要としたときに再試行します</string>
     <string name="lastResortOwnServer">自分のサーバーを設定している間は使いません。すべてのサイトがそのサーバーを通ります。</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">ほかの方法で開かないサイトのために Tor ネットワークに接続中… {progress}%</string>
     <string name="linkReleases">リリースノート</string>
     <string name="linkSourceCode">GitHub のソースコード</string>
+    <string name="linkWebsite">Codeshare のウェブサイト</string>
     <string name="madeBy">Codeshare Technology Ltd の製品</string>
     <string name="nationalOnlyBody">世界のほかの地域との接続が切断されています。国内のサイトはまだ開けます。アプリや VPN でもこれは回避できません。接続が戻れば Shroudly は自動で続けます。</string>
     <string name="nationalOnlyHelp">まだ役立つこと</string>
     <string name="nationalOnlyTitle">この国のネットワークしか使えません</string>
+    <string name="navFollow">フォロー</string>
     <string name="navInfo">情報</string>
     <string name="navProtection">保護</string>
     <string name="navSettings">設定</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">応答はありますが、経由してサイトが開きません</string>
     <string name="protected_">保護されています</string>
     <string name="protectionStopped">保護を停止しました</string>
+    <string name="reopenAppsHint">すでに開いていたアプリ：つながらないものがあれば、一度閉じて開き直してください。</string>
     <string name="searchApps">アプリを検索</string>
     <string name="shareApp">Shroudly を共有</string>
     <string name="shareAppText">ブロックされたサイトやアプリを開くための Android 版 Shroudly {version}。インストールするにはこのファイルを開き、スマートフォンに尋ねられたらこの提供元からのアプリのインストールを許可してください。</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Shroudly を支援</string>
     <string name="tagline">見えない。止められない。</string>
     <string name="testing">テスト中…</string>
+    <string name="torAskCard">このネットワークでは、どの手法でも {host} を開けませんでした。Shroudly は Tor ネットワーク経由で開けます。かなり遅く（ページや動画の読み込みが遅くなります）、captcha を求めるサイトもあります。回答は保存され、設定で変更できます。</string>
+    <string name="torAskNo">いいえ</string>
+    <string name="torAskNotice">このネットワークでは、どの手法でも {host} を開けませんでした。Shroudly は最後の手段である Tor ネットワーク経由で開けますが、かなり遅くなります。許可するか断るには Shroudly を開いてください。</string>
+    <string name="torAskTitle">{host} を Tor 経由で開きますか？</string>
+    <string name="torAskYes">Tor を使う</string>
+    <string name="torUsedPhone">{host} は Shroudly の最後の手段である Tor ネットワーク経由でしか開けませんでした。このネットワークでは他の方法が通りませんでした。速度が遅くなり、一部のサイトでは CAPTCHA が求められます。他のアプリやサイトはこれまでどおりです。</string>
+    <string name="torUsedTv">{host} は Shroudly の最後の手段である Tor ネットワーク経由でしか開けませんでした。そこからの動画は読み込みが遅くなったり画質が下がったりすることがあります。他のアプリはこれまでどおりです。</string>
     <string name="totalCount">合計：{count}</string>
     <string name="updAvailable">バージョン {version} が利用可能です</string>
     <string name="updDownload">ダウンロードしてインストール</string>
@@ -247,7 +263,7 @@
     <string name="upload">アップロード</string>
     <string name="uptime">稼働時間</string>
     <string name="versionLabel">バージョン {version}</string>
-    <string name="whatsNewAndroid">サイト別の接続: Shroudly を通るものを双方向のデータ量とともに表示し、どのサイトでもブロックできます (#74)。\nブロックするとそのサイトの接続はすぐに切れます。一覧は端末に保存されます。</string>
+    <string name="whatsNewAndroid">接続：Shroudly 自身が必要とする名前（DNS、Tor、自社サイト）を誤ってブロックできなくなりました。\nShroudly をフォロー：開発者のアカウントを先頭に。ニュースや緊急のお知らせはそちらで発信します。</string>
     <string name="whatsNewOk">OK</string>
     <string name="whatsNewTitle">{version} の新機能</string>
 </resources>

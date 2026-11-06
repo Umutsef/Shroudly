@@ -319,6 +319,11 @@ class ShroudlyVpnService : VpnService() {
                     "torLastResort" -> later {
                         engine?.let { engineGone(it, "restarted with the last way out ${if (TorRoute.enabled(this)) "on" else "off"}", countsAsCrash = false) }
                     }
+                    // The user said yes to Tor (TorAsk's card): it starts now.
+                    "torYes" -> later {
+                        log("The last way out: allowed by the user; Tor starts and stays allowed")
+                        if (active) torRoute.need()
+                    }
                     // Another DNS server: from the next lookup on, nothing restarted.
                     "dns" -> later {
                         if (active) {
@@ -439,8 +444,13 @@ class ShroudlyVpnService : VpnService() {
         if (errorRes == 0 || errorRes == R.string.androidVpnRevoked) KeepOn.stoppedByUser(this)
         else if (KeepOn.endedByItself(this)) log("Protection comes back by itself once a network is there, in ${KeepOn.RETRY_MS / 60000} minutes at the earliest")
         later {
-            // Out of the live count first, through the engine while it still
-            // runs; at the user's stop only (OnlineCount.stop).
+            // The VPN interface goes first: the phone's traffic leaves
+            // straight, or through the next VPN app, the moment protection
+            // stops (#78), not after the goodbye below.
+            dropInterface()
+            // Out of the live count, through the engine while it still runs
+            // (this app is outside its own VPN); at the user's stop only
+            // (OnlineCount.stop).
             OnlineCount.stop(leave = errorRes == 0, port = port, auth = auth)
             teardown()
             Protection.set(Protection.State.OFF)
@@ -498,7 +508,7 @@ class ShroudlyVpnService : VpnService() {
 
             // Encrypted DNS first, so the engine's first lookups have it. If it
             // cannot start, the engine falls back to plain DNS.
-            val d = DohForwarder(::log, prefs.getString("dohRoute", null)) { id ->
+            val d = DohForwarder(::log, prefs.getString("dohRoute", null), awake = { screenOn() }) { id ->
                 prefs.edit().putString("dohRoute", id).apply()
             }
             AppSettings.applyDns(this, d)
@@ -728,6 +738,10 @@ class ShroudlyVpnService : VpnService() {
     }
 
     /* ── running ───────────────────────────────────────────────────────── */
+
+    /* The screen is on (DohForwarder keeps its routes warm only then). */
+    private fun screenOn(): Boolean =
+        try { getSystemService(android.os.PowerManager::class.java)?.isInteractive != false } catch (_: Exception) { true }
 
     private fun tick() {
         if (!active) return
@@ -1252,8 +1266,12 @@ class ShroudlyVpnService : VpnService() {
             is EngineEvent.Error -> log("engine: ${ev.message}")
             is EngineEvent.Upstream -> if (!ev.ok) ownServer.down(OwnServer.whyCode(ev.why))
             // Nothing was listening: Tor is started for the next connection.
-            is EngineEvent.Fallback -> if (!ev.ok) { if (ev.why != "file unusable") torRoute.need() }
-                else logSite("${ev.host}: no technique got through; opened through the last way out (Tor)")
+            // Tor only once the user said yes (issue #77); until then asked.
+            is EngineEvent.Fallback -> if (!ev.ok) { if (ev.why != "file unusable") { if (TorRoute.approved(this)) torRoute.need() else TorAsk.ask(this, ev.host) } } else {
+                logSite("${ev.host}: no technique got through; opened through the last way out (Tor)")
+                if (ev.host.isNotEmpty()) TorNotice.used(this, ev.host)
+            }
+            is EngineEvent.DnsAround -> DnsNotice.around(this)
             is EngineEvent.Adblock -> when {
                 ev.error != null -> log("Ad blocking: the list could not be used (${ev.error})")
                 ev.on -> log("Ad blocking: a list of ${ev.entries} names in use")
@@ -1542,11 +1560,21 @@ class ShroudlyVpnService : VpnService() {
     private val torRoute by lazy { TorRoute(this, { log(it) }) { Protection.changed() } }
     private val connsCollector = Conns.Collector()
 
+    /* hev stopped and its thread waited for, then the VPN interface closed:
+     * Android takes its address, routes and DNS away with it. Safe twice. */
+    private fun dropInterface() {
+        stopTunnel()
+        try { tun?.close() } catch (_: Exception) {}
+        tun = null
+    }
+
     private fun teardown() {
         val wasActive = active
         active = false
         snowflake.stop()
         torRoute.stop()
+        TorNotice.reset()
+        TorAsk.reset()
         OnlineCount.stop(leave = false)
         healthEpoch++
         poll?.cancel(false); poll = null
@@ -1560,9 +1588,7 @@ class ShroudlyVpnService : VpnService() {
         networks.clear()
         network?.stop(getSystemService(ConnectivityManager::class.java))
         network = null
-        stopTunnel()
-        try { tun?.close() } catch (_: Exception) {}
-        tun = null
+        dropInterface()
         val total = Protection.stats?.connsTotal
         engine?.let { e ->
             if (!e.stop()) {

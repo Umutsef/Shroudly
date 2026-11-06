@@ -121,8 +121,8 @@
     <string name="connsRouteTor">تور</string>
     <string name="connsSearch">ابحث أو اكتب موقعًا لحظره</string>
     <string name="connsSystem">يستخدمه Shroudly</string>
-    <string name="connsSystemConfirm">يستخدم Shroudly نفسه {host}. قد يؤدي حظره إلى تعطيل DNS المشفّر أو التحديثات أو المخرج الأخير، وقد تتوقف المواقع عن الفتح. هل تريد حظره رغم ذلك؟</string>
     <string name="connsTitle">الاتصالات حسب الموقع</string>
+    <string name="dnsAroundAndroid">شيء آخر على هذا الجهاز يجيب عن استعلامات الأسماء للتطبيقات (DNS خاص أو تطبيق DNS)، لذلك قد لا تفتح التطبيقات المحجوبة. من الإعدادات ← الشبكة ← DNS الخاص اختر «إيقاف» أو «تلقائي»، وأغلق أي تطبيق DNS، ثم شغّل Shroudly من جديد.</string>
     <string name="dnsErrorEmpty">اكتب عنوان الخادم، مثل {example}.</string>
     <string name="dnsErrorHost">هذا ليس عنوان IP ولا اسم خادم؛ اكتبه مثل {example}.</string>
     <string name="dnsErrorPort">يجب أن يكون المنفذ رقمًا من 1 إلى 65535.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">تطبيقات تتجاوز Shroudly</string>
     <string name="excludedAppsCount">تطبيقات تتجاوز Shroudly: {count}</string>
     <string name="excludedAppsDesc">يخرج اتصالها مباشرةً دون المرور عبر Shroudly: مثل لعبة لا تحتاج إليه.</string>
+    <string name="followCodeshare">Codeshare، صانعو Shroudly</string>
+    <string name="followDesc">أخبار الحجب والإصدارات الجديدة وطرق التجاوز، أولًا بأول. المتابعة والمشاركة هما ما يوصل Shroudly إلى من يحتاجه، ولا تكلّفان شيئًا.</string>
+    <string name="followDeveloper">أوموت بيرقدار، مطوّر Shroudly</string>
+    <string name="followTitle">تابع Shroudly</string>
+    <string name="followTv">افتحها على هاتفك أو حاسوبك:</string>
     <string name="helpNudgeBodyPhone">يتيح تطبيق مجاني للناس في البلدان التي تراقب الإنترنت استخدام جزء صغير من اتصال هذا الهاتف لتجاوز الحجب. هذا آمن لك: لا يستطيعون الوصول إلى هاتفك ولا إلى شبكتك، والمواقع التي يفتحونها لا ترى عنوانك أبدًا.</string>
     <string name="helpNudgeShow">أرني</string>
     <string name="helpNudgeTitle">هل تودّ مساعدة الناس في البلدان الخاضعة للرقابة؟</string>
@@ -157,6 +162,7 @@
     <string name="language">اللغة</string>
     <string name="languageSystem">لغة النظام</string>
     <string name="lastResort">عندما لا ينجح شيء آخر: شبكة تور</string>
+    <string name="lastResortAsks">يسألك Shroudly قبل استخدامها لأول مرة.</string>
     <string name="lastResortDesc">الموقع الذي لا تفتحه أي تقنية يمرّ عبر تور، ويُوصَل إلى تور عبر سنوفليك: اتصالات متطوعين، ومنهم كل من فعّل «مساعدة الناس في البلدان الخاضعة للرقابة». أبطأ، وبعض المواقع تطلب من القادمين عبر تور اختبار كابتشا. لا يبدأ تور إلا عندما يحتاجه موقع.</string>
     <string name="lastResortFailed">تعذّر الوصول إلى شبكة تور؛ ستُعاد المحاولة عندما يحتاجها موقع</string>
     <string name="lastResortOwnServer">لا يُستخدم ما دام خادمك الخاص مضبوطًا: ذلك الخادم يحمل كل المواقع.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">جارٍ الاتصال بشبكة تور للمواقع التي لا يفتحها شيء آخر… ‎{progress}%</string>
     <string name="linkReleases">ملاحظات الإصدار</string>
     <string name="linkSourceCode">الشيفرة المصدرية على GitHub</string>
+    <string name="linkWebsite">موقع Codeshare</string>
     <string name="madeBy">منتج من Codeshare Technology Ltd</string>
     <string name="nationalOnlyBody">الاتصال ببقية العالم مقطوع؛ ولا تزال مواقع داخل البلد تفتح. لا يستطيع أي تطبيق أو VPN تجاوز ذلك. سيتابع Shroudly من تلقاء نفسه عند عودته.</string>
     <string name="nationalOnlyHelp">ما الذي قد يساعد بعد</string>
     <string name="nationalOnlyTitle">لا تعمل إلا شبكة هذا البلد</string>
+    <string name="navFollow">تابعنا</string>
     <string name="navInfo">حول</string>
     <string name="navProtection">الحماية</string>
     <string name="navSettings">الإعدادات</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">يجيب، لكن لم يمرّ عبره أي موقع</string>
     <string name="protected_">محمي</string>
     <string name="protectionStopped">توقفت الحماية</string>
+    <string name="reopenAppsHint">التطبيقات التي كانت مفتوحة من قبل: إن لم يتصل أحدها فأغلقه وافتحه مرة أخرى.</string>
     <string name="searchApps">ابحث عن تطبيق</string>
     <string name="shareApp">مشاركة Shroudly</string>
     <string name="shareAppText">Shroudly {version} لأندرويد، لفتح المواقع والتطبيقات المحجوبة. لتثبيته افتح هذا الملف، وإن سأل الهاتف فاسمح بتثبيت التطبيقات من هذا المصدر.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">ادعم Shroudly</string>
     <string name="tagline">غير مرئي. لا يُقهر.</string>
     <string name="testing">جارٍ الاختبار…</string>
+    <string name="torAskCard">لم تفتح أي تقنية {host} على هذه الشبكة. يمكن لـ Shroudly فتحه عبر شبكة Tor: أبطأ بكثير (تُحمَّل الصفحات ومقاطع الفيديو ببطء)، وبعض المواقع تطلب اختبار captcha. يُحفظ جوابك؛ ويمكنك تغييره من الإعدادات.</string>
+    <string name="torAskNo">لا</string>
+    <string name="torAskNotice">لم تفتح أي تقنية {host} على هذه الشبكة. يمكن لـ Shroudly فتحه عبر شبكة Tor، الملاذ الأخير، لكن بشكل أبطأ بكثير. افتح Shroudly للسماح أو الرفض.</string>
+    <string name="torAskTitle">هل تريد فتح {host} عبر Tor؟</string>
+    <string name="torAskYes">استخدام Tor</string>
+    <string name="torUsedPhone">لم يُفتح {host} إلا عبر شبكة Tor، آخر طريق لدى Shroudly: لم ينجح شيء آخر على هذه الشبكة. الاتصال أبطأ وبعض المواقع تطلب اختبار captcha؛ وبقية تطبيقاتك ومواقعك تعمل كما كانت.</string>
+    <string name="torUsedTv">لم يُفتح {host} إلا عبر شبكة Tor، آخر طريق لدى Shroudly. قد تُحمَّل مقاطع الفيديو منه ببطء أو بجودة أقل؛ وبقية تطبيقاتك تعمل كما كانت.</string>
     <string name="totalCount">الإجمالي: {count}</string>
     <string name="updAvailable">الإصدار {version} متاح</string>
     <string name="updDownload">تنزيل وتثبيت</string>
@@ -247,7 +263,7 @@
     <string name="upload">الرفع</string>
     <string name="uptime">مدة التشغيل</string>
     <string name="versionLabel">الإصدار {version}</string>
-    <string name="whatsNewAndroid">الاتصالات حسب الموقع: شاهد ما يمرّ عبر Shroudly مع البيانات في الاتجاهين، واحظر أي موقع تريده (#74).\nالحظر يقطع اتصالات الموقع فورًا؛ وتبقى القائمة على جهازك.</string>
+    <string name="whatsNewAndroid">الاتصالات: لم يعد بالإمكان حظر الأسماء التي يحتاجها Shroudly نفسه (خوادم DNS وTor ومواقعه) عن طريق الخطأ.\nتابع Shroudly: حسابات المطوّر أولًا، فهناك تُنشر الأخبار والتنبيهات العاجلة.</string>
     <string name="whatsNewOk">حسنًا</string>
     <string name="whatsNewTitle">الجديد في {version}</string>
 </resources>

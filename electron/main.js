@@ -42,6 +42,7 @@ const Rivals = require('./rivals');
 const FlatpakEnv = require('./flatpak-env');
 const LinkHandlers = require('./link-handlers');
 const RobloxApp = require('./roblox-app');
+const RiotApp = require('./riot-app');
 const { RobloxWatch } = require('./roblox-watch');
 const Autopilot = require('./autopilot');
 const AroundWatch = require('./around-watch');
@@ -76,6 +77,7 @@ const { ProtectionKeeper } = require('./protection-keeper');
 const { StoreSuggest } = require('./store-suggest');
 const TorRoute = require('./tor-route');
 const TorDownload = require('./tor-download');
+const TorFiles = require('./tor-files');
 
 /* "Shroudly --restore-proxy" runs once at login after a run that never got to
  * restore the system proxy (power loss, forced reboot), and from the watchdog
@@ -496,11 +498,86 @@ function tr() {
  * a small banner under a big green "Protected" was read as "it works". */
 function notRouting() { return !!(engine && engine.isActive() && !engine.routing()); }
 
+/* A site that only the last way out (Tor) opened: said to the user, since
+ * it is slower and some sites ask Tor's visitors for a captcha. Once per
+ * site a session, and at most once every TOR_TELL_MS, so a page of blocked
+ * resources cannot turn into a stream of notifications. */
+const TOR_TELL_MS = 15 * 60 * 1000;
+const torTold = new Set();
+let torToldAt = 0;
+/* Tor asked for, not yet allowed (issue #77): a site no technique opened.
+ * The user decides in the window (ControlPanel's card): a notification says
+ * so, at most every TOR_ASK_MS; no window of its own, never the screen
+ * taken. The answer is kept (torApproved, or the last way out turned off);
+ * Settings → the Tor toggle changes it. */
+const TOR_ASK_MS = 30 * 60 * 1000;
+let torAsk = null;
+let torAskedAt = 0;
+function askTor(host) {
+  const h = String(host || '').toLowerCase();
+  const had = torAsk;
+  torAsk = { host: h || (had && had.host) || '' };
+  if (!had) addLog('info', `The last way out: ${torAsk.host || 'a site'} needs Tor; asking before it starts`);
+  const now = Date.now();
+  if (now - torAskedAt >= TOR_ASK_MS) {
+    torAskedAt = now;
+    const text = String(tr().torAskNotice || '').replace(/\{host\}/g, torAsk.host || '');
+    if (text) notify('Shroudly', text);
+  }
+  toWindow('dpi:status-changed', !!(engine && engine.isActive()));
+}
+function answerTor(yes) {
+  const host = torAsk ? torAsk.host : '';
+  torAsk = null;
+  if (yes) {
+    store.set('torApproved', true);
+    addLog('info', `The last way out: allowed by the user${host ? ` (for ${host})` : ''}; Tor starts and stays allowed`);
+    if (engine && engine.isActive() && engine.tor) engine.tor.need();
+  } else {
+    store.set('torApproved', false);
+    store.set('torLastResort', false);
+    addLog('info', 'The last way out: the user said no; Tor stays off (Settings → Connection turns it on)');
+    scheduleEngineRestart();
+  }
+  toWindow('dpi:status-changed', !!(engine && engine.isActive()));
+  return { success: true };
+}
+ipcMain.handle('tor:answer', (e, yes) => answerTor(yes === true));
+
+function torUsed(host) {
+  const h = String(host || '').toLowerCase();
+  if (!h || torTold.has(h)) return;
+  torTold.add(h);
+  const now = Date.now();
+  if (now - torToldAt < TOR_TELL_MS) return;
+  torToldAt = now;
+  autoTell('torUsedDesktop', { host: h });
+}
+
+/* A small JSON document over HTTPS. Node's https rather than fetch(): the
+ * Windows 7 and 8 build runs Electron 22, whose Node (16) has no fetch. */
+function getJson(url, timeout) {
+  return new Promise((resolve, reject) => {
+    const req = require('https').get(url, { headers: { 'cache-control': 'no-store' } }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); reject(new Error(`HTTP ${res.statusCode}`)); return; }
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (d) => { body += d; if (body.length > 1 << 20) req.destroy(new Error('too large')); });
+      res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
+    });
+    req.setTimeout(timeout, () => req.destroy(new Error('timed out')));
+    req.on('error', reject);
+  });
+}
+
 /* Advanced mode on or off, told to the window. Where the system proxy is
  * set by the computer's administrator (system-proxy.js, machine_policy) it
  * is what carries browsers, so the tray and the status follow it too. */
 function advancedState(active) {
   toWindow('advanced:state', { active });
+  // Tor is the last of all ways: the sites it carried until now try Advanced
+  // mode first.
+  if (active && engine) { try { engine.forgetFallback(); } catch {} }
   if (engine && engine.proxyStatus && engine.proxyStatus.code === 'machine_policy') {
     rebuildTrayMenu();
     toWindow('dpi:status-changed', engine.isActive());
@@ -756,8 +833,11 @@ let sessionWatch = null;
 function watchSessionEnd() {
   if (process.platform !== 'win32' || sessionWatch) return;
   try {
-    const { BaseWindow } = require('electron');
-    sessionWatch = new BaseWindow({ show: false, width: 1, height: 1, frame: false, skipTaskbar: true, focusable: false });
+    // BaseWindow (no web content) came in Electron 30; the Windows 7 and 8
+    // build (Electron 22) keeps an empty, hidden BrowserWindow instead.
+    const { BaseWindow, BrowserWindow: Plain } = require('electron');
+    const Watch = BaseWindow || Plain;
+    sessionWatch = new Watch({ show: false, width: 1, height: 1, frame: false, skipTaskbar: true, focusable: false });
     sessionWatch.on('query-session-end', () => { keepDiscordLine = discordLineOutlivesSession(); });
     sessionWatch.on('session-end', restoreForSessionEnd);
   } catch (e) { addLog('warning', `Logoff watch not available: ${e.message}`); }
@@ -1028,6 +1108,8 @@ async function safeStop({ user = false } = {}) {
   if (user) { store.set(PROTECTION_KEY, false); lastStartFailed = false; }
   // Nothing of Roblox's is stopped or started once protection is going off.
   robloxWatch.halt();
+  // A question about Tor belongs to this session: a new one asks again.
+  torAsk = null;
   // A settings change still waiting to be applied belongs to the session
   // being stopped (EngineManager ignores one that slips through anyway).
   clearTimeout(engineRestartTimer); engineRestartTimer = null;
@@ -1214,7 +1296,9 @@ app.whenReady().then(async () => {
     onChange: () => toWindow('dpi:status-changed', !!(engine && engine.isActive())),
     // Fetched the first time it is needed (issue #75), through the engine
     // while it runs, so a network that blocks torproject.org does not stop it.
-    fetch: (dir, onProgress) => TorDownload.ensure(dir, {
+    // Not on Windows 7 and 8: the Tor Project's Tor no longer runs there
+    // (torOldWindows), so there is nothing to fetch.
+    fetch: torUnsupported() ? null : (dir, onProgress) => TorDownload.ensure(dir, {
       socksPort: engine && engine.isActive() ? engine.port : 0,
       connect: (port, host, p) => (port ? DiscordRelay.socksConnect(port, host, p) : new Promise((resolve, reject) => {
         const sock = require('net').connect(p, host, () => resolve(sock)); sock.once('error', reject);
@@ -1224,6 +1308,8 @@ app.whenReady().then(async () => {
   });
   engine = new EngineManager(store, {
     addLog, onStatusChange: broadcastStatus, torRoute,
+    // Tor needed, not yet allowed: the user is asked (askTor).
+    onTorAsk: (host) => askTor(host),
     // An antivirus took, refused or keeps ending the engine.
     onSecurityBlock: (info) => securityBlocked(info),
     // "Block ads and trackers": the list in use, once one has been fetched.
@@ -1309,6 +1395,7 @@ app.whenReady().then(async () => {
     // it believes them (one means little), and only for a site's own page:
     // a CDN, API or storage host answers / with an error page of its own.
     onHostEvent: (kind, host, detail, info) => {
+      if (kind === 'fallback') torUsed(host);
       if (autopilot) autopilot.noteHost(kind, host, info || { note: detail });
       if (aroundWatch) aroundWatch.note(kind, host, info || { note: detail });
       if (kind === 'unreachable' && detail === 'connect') checkServiceReach(host).catch(() => {});
@@ -1343,6 +1430,14 @@ app.whenReady().then(async () => {
       toWindow('dpi:site-blocked', { host, asked });
     },
   });
+  // Windows: the running programs and their connections from the engine
+  // while it runs, instead of tasklist.exe and netstat.exe (procnet.js).
+  if (process.platform === 'win32') {
+    ProcNet.setNative({
+      procs: () => (engine ? engine.nativeList('PROCS') : Promise.resolve(null)),
+      tcp: () => (engine ? engine.nativeList('TCP') : Promise.resolve(null)),
+    });
+  }
   // "Share my connection": what the people sharing open goes through the
   // engine while protection is on. On again at start when the user left it on.
   share = new Share({
@@ -1744,11 +1839,7 @@ function macStoreSuggest() {
       packaged: app.isPackaged,
       mas: !!process.mas,
       country: () => app.getLocaleCountryCode(),
-      fetchJson: async (url) => {
-        const res = await fetch(url, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      },
+      fetchJson: (url) => getJson(url, 8000),
     });
   }
   return storeSuggest;
@@ -1812,6 +1903,8 @@ ipcMain.handle('dpi:status', () => ({
   // The last way out (tor-route.js): { state, progress, used } while it
   // runs or has failed, else null.
   lastResort: (engine && engine.isActive() && engine.tor && engine.tor.status().state !== 'off') ? engine.tor.status() : null,
+  // A site needs Tor and the user has not said yes yet (askTor): its name.
+  torAsk: (engine && engine.isActive() && torAsk && store.get('torLastResort', true) !== false) ? (torAsk.host || '') : null,
   // The user's own server is not carrying connections: { server, why }.
   ownServerDown: (engine && engine.isActive() && engine.advice && engine.advice.ownServerDown) || null,
   // ...and while it does, the address sites see through it: { server, ip }.
@@ -2745,9 +2838,10 @@ function tellHeld(app, addr) {
  * again a minute later, and the port still refusing. Discord is looked
  * after on its own (its Drover is set aside), Shroudly is never named. */
 const heldSeen = new Map();   // "pid port" -> when first seen
-function netstatTcp() {
-  return new Promise((resolve) => require('child_process').execFile('netstat', ['-ano', '-p', 'TCP'], { windowsHide: true, timeout: 8000, maxBuffer: 8 * 1024 * 1024 },
-    (err, out) => resolve(err && !out ? '' : String(out || ''))));
+/* netstat -ano's TCP lines (procnet.js netstatText: the engine's table
+ * where it runs); fresh: not one another look took a moment ago. */
+function netstatTcp(fresh = false) {
+  return ProcNet.netstatText(fresh ? 0 : 4000);
 }
 function processName(pid) {
   return new Promise((resolve) => require('child_process').execFile('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 8000 },
@@ -2756,10 +2850,14 @@ function processName(pid) {
 async function checkHeldPrograms() {
   if (process.platform !== 'win32') return;
   const ours = [engine && engine.port, discordRelay && discordRelay.port, appProxy && appProxy.port].filter(Boolean);
-  const rows = [];
-  for (let i = 0; i < 3; i++) {
-    rows.push(...ProcNet.parseNetstat(await netstatTcp()));
-    if (i < 2) await new Promise((r) => setTimeout(r, 700));
+  // One look first: almost always nothing waits on a proxy port here, and
+  // netstat on a busy Windows is not free. Only then two more, 0.7 s apart,
+  // so a program reaching anywhere else in any of them is not taken as held.
+  const rows = ProcNet.parseNetstat(await netstatTcp());
+  if (!ProcNet.heldLocally(rows, { ours }).size) { heldSeen.clear(); return; }
+  for (let i = 0; i < 2; i++) {
+    await new Promise((r) => setTimeout(r, 700));
+    rows.push(...ProcNet.parseNetstat(await netstatTcp(true)));
   }
   const now = Date.now();
   const live = new Set();
@@ -2942,6 +3040,19 @@ function createAutopilot() {
         told: 'autoRobloxOn',
         toldOff: 'autoRobloxOffByHand',
         toldFailed: 'autoRobloxFailed',
+      },
+      {
+        // League of Legends, VALORANT and their installer (#76): the same
+        // mode as Roblox, for the same reason (they never use the system
+        // proxy). Its app is not needed: someone on the website, about to
+        // run the installer, needs it most.
+        id: 'riot', name: 'Riot Games', probe: 'www.leagueoflegends.com', mode: 'appMode', needsApp: false,
+        present: () => appModeSupported() && RiotApp.installed(),
+        enable: () => (appModeSupported() ? applyAppMode(true) : Promise.resolve({ success: false, code: 'unsupported' })),
+        logOn: 'Autopilot: Riot Games is blocked on this network; Games and apps mode turned on',
+        told: 'autoRiotOn',
+        toldOff: 'autoRiotOffByHand',
+        toldFailed: 'autoRiotFailed',
       },
     ],
     // Roblox found blocked: its programs that go around Shroudly are seen
@@ -3208,6 +3319,9 @@ ipcMain.handle('settings:set', (e, key, value) => {
   // No list of one's own: follow the automatic list again.
   if (key === 'siteList' && !Array.isArray(value)) store.delete('siteList');
   else store.set(key, value);
+  // The Tor toggle turned on by hand is the user's yes to it (issue #77);
+  // off, it asks again the next time it is turned on.
+  if (key === 'torLastResort') { store.set('torApproved', value === true); torAsk = null; }
   if (ENGINE_SETTINGS.has(key)) scheduleEngineRestart();
   if (PROXY_SETTINGS.has(key)) { routing = null; scheduleProxyReapply(); scheduleSiteListCheck(5000); }
   if (key === 'adBlock' || key === 'adBlockAllow') {
@@ -3257,11 +3371,23 @@ ipcMain.handle('conns:list', async () => {
   return {
     rows: rows.map((r) => ({ ...r, system: SystemHosts.isSystemHost(r.host, [own]) })),
     blocked: store.get('userBlocked', []),
+    // The names Shroudly needs: never offered for blocking (typed ones neither).
+    ownNames: [...SystemHosts.SYSTEM_HOSTS, ...(own ? [own] : [])],
   };
 });
 /* Settings, the last way out: whether Tor is on this computer yet, and
  * fetching it ahead of time ("Prepare it now", issue #75). */
+/* Windows 7, 8 and 8.1 (the legacy build): Tor 16 needs Windows 10. */
+function torOldWindows() {
+  return process.platform === 'win32' && Number(String(require('os').release()).split('.')[0]) < 10;
+}
+/* No Tor for this system: Windows 7 and 8, or a processor the Tor Project
+ * builds no Tor for (32-bit ARM Linux). */
+function torUnsupported() {
+  return torOldWindows() || !TorFiles.DESKTOP[TorDownload.target()];
+}
 ipcMain.handle('tor:status', () => {
+  if (torUnsupported()) return { present: false, state: 'off', progress: 0, unsupported: torOldWindows() ? 'windows' : 'arch' };
   const t = engine && engine.tor;
   return t ? { present: t.present(), state: t.status().state, progress: t.status().progress } : { present: false, state: 'off', progress: 0 };
 });
@@ -3271,6 +3397,13 @@ ipcMain.handle('tor:prepare', async () => {
 });
 ipcMain.handle('conns:block', (e, host, on) => {
   if (!engine) return { ok: false };
+  // A name Shroudly itself needs is never blocked (the window offers no
+  // button for it); unblocking one blocked before stays possible.
+  if (on === true) {
+    let own = null;
+    try { const p = OwnServer.parseLink(store.get('ownServer')); if (p.ok) own = p.host; } catch {}
+    if (SystemHosts.isSystemHost(host, [own])) return { ok: false, why: 'system' };
+  }
   return engine.setBlocked(host, on === true);
 });
 

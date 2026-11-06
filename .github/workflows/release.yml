@@ -86,6 +86,20 @@ jobs:
         if: matrix.platform == 'win'
         run: npx electron-builder --win --publish never
 
+      # Windows 7, 8 and 8.1: the same app on Electron 22, the last that runs
+      # there (electron-builder-legacy.js), with Windows' Universal C runtime
+      # beside the engine (fetch-ucrt.js; after the Windows 10 build, which
+      # does not carry it). One installer for 32- and 64-bit, and its own
+      # update feed (legacy.yml).
+      - name: Package (Windows 7 and 8)
+        if: matrix.platform == 'win'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/fetch-ucrt.js
+          npx electron-builder --win --publish never -c electron-builder-legacy.js
+          cp dist-legacy/*-Windows7-8-Setup.exe dist-legacy/legacy.yml dist/
+
       # Signed with the Developer ID and notarized by Apple once those secrets
       # are set (apple/APP_STORE.md, step 6): no "unidentified developer" on
       # the first start. Until then ad-hoc signed, as before.
@@ -130,6 +144,7 @@ jobs:
             dist/*.pacman
             dist/*.rpm
             dist/latest*.yml
+            dist/legacy.yml
 
   # ── Windows code signing via SignPath (off unless enabled) ───────────────
   # A job of its own, after the build: a release-signing request waits for
@@ -225,6 +240,7 @@ jobs:
           path: |
             dist/*.exe
             dist/latest*.yml
+            dist/legacy.yml
 
   # ── Install what was built, on the systems it is for, before anything is
   # published. A package that does not install, misses a library or whose
@@ -316,6 +332,24 @@ jobs:
           fi
           echo "ok  the server helper set up, running as its own user, and removed"
 
+  # 32-bit ARM Linux (armhf: Raspberry Pi OS 32-bit and the like). GitHub has
+  # no such machine, so a 32-bit ARM Debian runs under QEMU: the AppImage is
+  # unpacked there by its own runtime, its engine starts, and the .deb says
+  # armhf.
+  appimage-armv7l:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist-linux
+          path: dist
+      - name: 32-bit ARM in QEMU
+        run: docker run --privileged --rm tonistiigi/binfmt --install arm
+      - name: The armv7l AppImage and .deb on 32-bit ARM Debian
+        run: docker run --rm --platform linux/arm/v7 -v "$PWD:/w" -w /w debian:12-slim sh scripts/ci-armv7l-test.sh
+
   windows-install:
     # The signed installers when signing is on; the build's otherwise.
     needs: [build, sign-windows]
@@ -326,6 +360,10 @@ jobs:
         include:
           - { os: windows-latest, arch: x64 }
           - { os: windows-11-arm, arch: arm64 }
+          # 32-bit Windows 10/11 (as 32-bit programs run on 64-bit Windows),
+          # and the Windows 7 and 8 installer (Electron 22).
+          - { os: windows-latest, arch: ia32 }
+          - { os: windows-latest, arch: legacy }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -404,7 +442,10 @@ jobs:
   # the API key lets xcodebuild make the certificates and profiles.
   apple:
     # Only a release tag uploads: a manual run tries the build, never the store.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A GitHub-only release (while the stores are reviewing the last one) sets
+    # the repository variable APPLE_UPLOAD to off: nothing goes to App Store
+    # Connect then. Play is never uploaded from here (a bundle by hand, below).
+    if: startsWith(github.ref, 'refs/tags/v') && vars.APPLE_UPLOAD != 'off'
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -443,6 +484,18 @@ jobs:
           bash apple/scripts/build-hev.sh
           node apple/scripts/gen-strings.js --check
           node apple/scripts/gen-version.js
+      # Each run's automatic signing gets a new development certificate from
+      # Apple; ten of them fill the account and the next archive fails. Those
+      # made during this run are revoked at the end (apple/scripts/ci-dev-certs.js).
+      - name: Development certificates before the archive
+        if: steps.ready.outputs.ok == '1'
+        shell: bash
+        run: |
+          printf '%s' "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/certs.p8"
+          ASC_KEY_PATH="$RUNNER_TEMP/certs.p8" node apple/scripts/ci-dev-certs.js list > "$RUNNER_TEMP/dev-certs.tmp" \
+            && mv "$RUNNER_TEMP/dev-certs.tmp" "$RUNNER_TEMP/dev-certs-before.txt"
+          rm -f "$RUNNER_TEMP/certs.p8"
+          [ -f "$RUNNER_TEMP/dev-certs-before.txt" ] || echo "::warning::could not list development certificates: none will be revoked"
       - name: Archive and upload (iOS, macOS, then tvOS)
         if: steps.ready.outputs.ok == '1'
         shell: bash
@@ -482,6 +535,14 @@ jobs:
               -exportOptionsPlist "$options" -exportPath "$RUNNER_TEMP/export-$platform" "${auth[@]}"
             echo "ok  $platform build uploaded to App Store Connect"
           done
+      - name: Revoke this run's development certificates
+        if: always() && steps.ready.outputs.ok == '1'
+        shell: bash
+        run: |
+          [ -f "$RUNNER_TEMP/dev-certs-before.txt" ] || { echo "no list from before the archive: nothing revoked"; exit 0; }
+          printf '%s' "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/certs.p8"
+          trap 'rm -f "$RUNNER_TEMP/certs.p8"' EXIT
+          ASC_KEY_PATH="$RUNNER_TEMP/certs.p8" node apple/scripts/ci-dev-certs.js revoke-new "$RUNNER_TEMP/dev-certs-before.txt"
 
   # The iPhone and iPad app as an .ipa, on the release beside the others, for
   # installing it outside the App Store until the App Store has it (TrollStore,
@@ -628,7 +689,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [build, sign-windows, linux-packages, appimage, windows-install, macos-dmg, android, ios-ipa]
+    needs: [build, sign-windows, linux-packages, appimage, appimage-armv7l, windows-install, macos-dmg, android, ios-ipa]
     runs-on: ubuntu-latest
     # sign-windows is skipped while signing is off; anything failed stops it.
     if: ${{ startsWith(github.ref, 'refs/tags/') && !cancelled() && !failure() }}

@@ -37,15 +37,17 @@ struct ContentView: View {
                 VStack(spacing: wide || Self.compact ? 20 : 28) {
                     Spacer(minLength: wide ? 8 : 0)
                     if wide {
-                        HStack(alignment: .center, spacing: 40) {
+                        // Apple TV: a wider column for its larger type, so the
+                        // cards' words are not cut off.
+                        HStack(alignment: .center, spacing: Theme.isTV ? 80 : 40) {
                             status
                             VStack(spacing: 14) {
                                 card
                                 statsView
                             }
-                            .frame(maxWidth: 460)
+                            .frame(maxWidth: Theme.isTV ? 820 : 460)
                         }
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, Theme.isTV ? 80 : 24)
                     } else {
                         status
                         card
@@ -160,10 +162,10 @@ struct ContentView: View {
 
     /* Debug builds' screenshots: believable numbers instead of dashes. */
     private static let previewSince = Date().addingTimeInterval(-(42 * 60 + 17))
-    private static let previewStats = EngineStats(["conns_active": 14, "conns_total": 386, "bytes_down": 248_000_000, "bytes_up": 19_400_000, "online": 1_204])
+    private static let previewStats = EngineStats(["conns_active": 14, "conns_total": 386, "blocked": 37, "bytes_down": 248_000_000, "bytes_up": 19_400_000, "online": 1_204])
 
     private var hasCard: Bool {
-        phase == .on && (watch.ownServerDown != nil || watch.national != nil || (helpDue && controller.notice == nil && !Theme.isTV))
+        phase == .on && (watch.ownServerDown != nil || watch.national != nil || controller.dnsAround || controller.torAsk != nil || (helpDue && controller.notice == nil && !Theme.isTV))
     }
 
     /* The one card under the status, when there is one. */
@@ -172,6 +174,14 @@ struct ContentView: View {
             Warning(title: tr("ownServerDown"),
                     text: tr("ownServerDownBody", ["server": down.server, "why": OwnServer.whyText(down.why),
                                                    "path": "\(tr("navSettings")) \(direction == .rightToLeft ? "←" : "→") \(tr("ownServer"))"]))
+        } else if phase == .on, let host = controller.torAsk {
+            // A site needs Tor; asked here, never in a window of its own (issue #77).
+            TorAskCard(host: host.isEmpty ? "…" : host,
+                       yes: { Task { await controller.answerTor(true) } },
+                       no: { Task { await controller.answerTor(false) } })
+        } else if phase == .on, controller.dnsAround {
+            // A DNS profile or app answers apps' lookups before the tunnel.
+            Warning(title: tr("dnsAroundTitle"), text: tr("dnsAroundApple"))
         } else if phase == .on, watch.national != nil {
             Warning(title: tr("nationalOnlyTitle"), text: tr("nationalOnlyBody"),
                     link: (tr("nationalOnlyHelp"), NationalNet.guideURL(language: Bundle.main.preferredLocalizations.first ?? "en")))
@@ -188,16 +198,20 @@ struct ContentView: View {
     }
 
     private var tabs: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Theme.isTV ? 40 : 12) {
             NavigationLink { SettingsView() } label: {
                 Tab(icon: "gearshape", text: tr("navSettings"))
+            }
+            // Follow Shroudly: a tab of its own, beside About (AboutView.swift).
+            NavigationLink { FollowView() } label: {
+                Tab(icon: "person.2", text: tr("navFollow"))
             }
             NavigationLink { AboutView() } label: {
                 Tab(icon: "info.circle", text: tr("navInfo"))
             }
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: 520)
+        .frame(maxWidth: Theme.isTV ? 1100 : 520)
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
     }
@@ -215,6 +229,12 @@ struct ContentView: View {
             case "failed": return tr("lastResortFailed")
             default: return tr("lastResortStarting", ["progress": String(lr.progress)])
             }
+        }
+        // Just started: an app that was open before may hold its old
+        // connections; said for the first two minutes.
+        if phase == .on, let since = controller.connectedSince, Date().timeIntervalSince(since) < 120,
+           watch.ownServerDown == nil, watch.national == nil {
+            return tr("reopenAppsHint")
         }
         return tr("tagline")
     }
@@ -363,6 +383,39 @@ private struct HelpCard: View {
                 Button(tr("supportBannerLater"), action: later)
                     .foregroundStyle(Theme.secondaryText)
                 Button(tr("helpNudgeShow"), action: show)
+                    .buttonStyle(.borderedProminent)
+            }
+            .font(.footnote.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+    }
+}
+
+/* A site no technique opened can go through Tor, much more slowly: asked,
+ * with "No" and "Use Tor" (issue #77). */
+private struct TorAskCard: View {
+    let host: String
+    let yes: () -> Void
+    let no: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(tr("torAskTitle", ["host": host]), systemImage: "network")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(tr("torAskCard", ["host": host]))
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                Spacer()
+                Button(tr("torAskNo"), action: no)
+                    .foregroundStyle(Theme.secondaryText)
+                Button(tr("torAskYes"), action: yes)
                     .buttonStyle(.borderedProminent)
             }
             .font(.footnote.weight(.semibold))

@@ -24,6 +24,11 @@ object Protection {
     // SystemClock.elapsedRealtime() when protection came on (0: off): how long
     // it has been on, which no change of the date moves.
     @Volatile var startedAt = 0L
+    /* Apps' lookups go around the tunnel (DnsNotice): said in the window too. */
+    @Volatile var dnsAround = false
+    /* A site needs Tor and the user has not said yes yet (TorAsk): its name
+     * ("" when the engine did not give one), null when nothing is asked. */
+    @Volatile var torAsk: String? = null
     // How Android runs this VPN, and whether it carries IPv6 (for "Share logs").
     @Volatile var alwaysOn = false
     @Volatile var lockdown = false
@@ -60,7 +65,7 @@ object Protection {
         state = s
         if (s == State.STARTING) { errorRes = 0; errorDetail = null }
         if (s != State.ON) { socksPort = 0; socksAuth = null; proxyPortTaken = 0 }
-        if (s == State.OFF) { stats = null; startedAt = 0; proxyOnly = false; national = null; ownServerDown = null; ownServerExit = null }
+        if (s == State.OFF) { stats = null; startedAt = 0; dnsAround = false; torAsk = null; proxyOnly = false; national = null; ownServerDown = null; ownServerExit = null }
         changed()
     }
 

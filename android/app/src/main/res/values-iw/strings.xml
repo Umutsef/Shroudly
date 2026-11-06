@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">חיפוש או הקלדת אתר לחסימה</string>
     <string name="connsSystem">בשימוש Shroudly</string>
-    <string name="connsSystemConfirm">Shroudly עצמו משתמש ב-{host}. חסימה עלולה לשבש את ה-DNS המוצפן, העדכונים או הדרך האחרונה, ואתרים עלולים להפסיק להיפתח. לחסום בכל זאת?</string>
     <string name="connsTitle">חיבורים לפי אתר</string>
+    <string name="dnsAroundAndroid">משהו אחר במכשיר הזה עונה לבדיקות השמות של האפליקציות (DNS פרטי או אפליקציית DNS), ולכן אפליקציות חסומות עלולות לא להיפתח. בהגדרות ← רשת ← DNS פרטי בחרו כבוי או אוטומטי, סגרו אפליקציות DNS והפעילו את Shroudly מחדש.</string>
     <string name="dnsErrorEmpty">הקלידו את כתובת השרת, למשל {example}.</string>
     <string name="dnsErrorHost">זו לא כתובת IP וגם לא שם שרת; הקלידו אותה כמו {example}.</string>
     <string name="dnsErrorPort">הפורט חייב להיות מספר בין 1 ל-65535.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">אפליקציות שעוקפות את Shroudly</string>
     <string name="excludedAppsCount">אפליקציות שעוקפות את Shroudly: {count}</string>
     <string name="excludedAppsDesc">התעבורה שלהן יוצאת ישירות, בלי לעבור דרך Shroudly: למשל משחק שלא צריך אותו.</string>
+    <string name="followCodeshare">Codeshare, שיוצרים את Shroudly</string>
+    <string name="followDesc">חדשות על חסימות, גרסאות חדשות ודרכים לעקוף, ראשונים. מעקב ושיתוף הם הדרך של Shroudly להגיע למי שצריך אותה, וזה לא עולה כלום.</string>
+    <string name="followDeveloper">אומוט ביירקטר, המפתח של Shroudly</string>
+    <string name="followTitle">עקבו אחרי Shroudly</string>
+    <string name="followTv">פתחו אותם בטלפון או במחשב:</string>
     <string name="helpNudgeBodyPhone">אפליקציה חינמית מאפשרת לאנשים במדינות שמצנזרות את האינטרנט להשתמש במעט מהחיבור של הטלפון הזה כדי לעקוף את החסימות. זה בטוח בשבילכם: הם לא יכולים להגיע לטלפון או לרשת שלכם, והאתרים שהם פותחים אף פעם לא רואים את הכתובת שלכם.</string>
     <string name="helpNudgeShow">הראו לי</string>
     <string name="helpNudgeTitle">לעזור לאנשים במדינות עם צנזורה?</string>
@@ -157,6 +162,7 @@
     <string name="language">שפה</string>
     <string name="languageSystem">ברירת המחדל של המערכת</string>
     <string name="lastResort">כשום דבר אחר לא עובד: רשת Tor</string>
+    <string name="lastResortAsks">Shroudly שואל אתכם לפני השימוש הראשון.</string>
     <string name="lastResortDesc">אתר ששום טכניקה לא פותחת עובר דרך Tor, שאליו מגיעים דרך Snowflake: החיבורים של מתנדבים, ובהם כל מי שהפעיל את „לעזור לאנשים במדינות עם צנזורה”. איטי יותר, וחלק מהאתרים מבקשים ממבקרים שמגיעים מ-Tor לפתור קפצ\'ה. Tor מופעל רק כשאתר צריך אותו.</string>
     <string name="lastResortFailed">לא ניתן היה להגיע לרשת Tor; ניסיון חוזר כשאתר יצטרך אותה</string>
     <string name="lastResortOwnServer">לא בשימוש כל עוד השרת שלך מוגדר: השרת הזה מעביר את כל האתרים.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">מתחבר לרשת Tor בשביל אתרים ששום דבר אחר לא פותח… ‎{progress}%</string>
     <string name="linkReleases">הערות גרסה</string>
     <string name="linkSourceCode">קוד המקור ב-GitHub</string>
+    <string name="linkWebsite">האתר של Codeshare</string>
     <string name="madeBy">מוצר של Codeshare Technology Ltd</string>
     <string name="nationalOnlyBody">החיבור לשאר העולם מנותק; אתרים בתוך המדינה עדיין נפתחים. אף אפליקציה או VPN לא יכולים לעקוף את זה. Shroudly ימשיך מעצמו כשהחיבור יחזור.</string>
     <string name="nationalOnlyHelp">מה עוד יכול לעזור</string>
     <string name="nationalOnlyTitle">רק הרשת של המדינה הזו עובדת</string>
+    <string name="navFollow">עקבו</string>
     <string name="navInfo">אודות</string>
     <string name="navProtection">הגנה</string>
     <string name="navSettings">הגדרות</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">הוא עונה, אבל שום אתר לא עבר דרכו</string>
     <string name="protected_">מוגן</string>
     <string name="protectionStopped">ההגנה הופסקה</string>
+    <string name="reopenAppsHint">אפליקציות שכבר היו פתוחות: אם אחת לא מתחברת, סגרו אותה ופתחו אותה שוב פעם אחת.</string>
     <string name="searchApps">חיפוש אפליקציות</string>
     <string name="shareApp">שיתוף Shroudly</string>
     <string name="shareAppText">Shroudly {version} לאנדרואיד, לפתיחת אתרים ואפליקציות חסומים. כדי להתקין, פתחו את הקובץ הזה; אם הטלפון שואל, אפשרו התקנת אפליקציות מהמקור הזה.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">תמיכה ב-Shroudly</string>
     <string name="tagline">בלתי נראה. בלתי ניתן לעצירה.</string>
     <string name="testing">בודק…</string>
+    <string name="torAskCard">אף שיטה לא פתחה את {host} ברשת הזו. Shroudly יכול לפתוח אותו דרך רשת Tor: איטי הרבה יותר (דפים וסרטונים נטענים לאט), ויש אתרים שמבקשים captcha. התשובה שלכם נשמרת; אפשר לשנות אותה בהגדרות.</string>
+    <string name="torAskNo">לא</string>
+    <string name="torAskNotice">אף שיטה לא פתחה את {host} ברשת הזו. Shroudly יכול לפתוח אותו דרך רשת Tor, המוצא האחרון שלו, אבל לאט הרבה יותר. פתחו את Shroudly כדי לאשר או לסרב.</string>
+    <string name="torAskTitle">לפתוח את {host} דרך Tor?</string>
+    <string name="torAskYes">להשתמש ב-Tor</string>
+    <string name="torUsedPhone">{host} נפתח רק דרך רשת Tor, הדרך האחרונה של Shroudly: שום דבר אחר לא עבר ברשת הזו. זה איטי יותר, ויש אתרים שמבקשים captcha; שאר האפליקציות והאתרים שלך ממשיכים כרגיל.</string>
+    <string name="torUsedTv">{host} נפתח רק דרך רשת Tor, הדרך האחרונה של Shroudly. סרטונים ממנו עלולים להיטען לאט או באיכות נמוכה יותר; שאר האפליקציות שלך ממשיכות כרגיל.</string>
     <string name="totalCount">סה״כ: {count}</string>
     <string name="updAvailable">גרסה {version} זמינה</string>
     <string name="updDownload">להוריד ולהתקין</string>
@@ -247,7 +263,7 @@
     <string name="upload">העלאה</string>
     <string name="uptime">זמן פעילות</string>
     <string name="versionLabel">גרסה {version}</string>
-    <string name="whatsNewAndroid">חיבורים לפי אתר: רואים מה עובר דרך Shroudly, עם הנתונים בשני הכיוונים, וחוסמים כל אתר (#74).\nחסימה מנתקת מיד את החיבורים של האתר; הרשימה נשארת במכשיר שלך.</string>
+    <string name="whatsNewAndroid">חיבורים: את השמות ש-Shroudly עצמו צריך (ה-DNS שלו, Tor, האתרים שלו) כבר אי אפשר לחסום בטעות.\nעקבו אחרי Shroudly: קודם החשבונות של המפתח – שם מתפרסמים חדשות והודעות דחופות.</string>
     <string name="whatsNewOk">הבנתי</string>
     <string name="whatsNewTitle">מה חדש בגרסה {version}</string>
 </resources>

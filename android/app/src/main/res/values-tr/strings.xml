@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">Ara ya da engellemek için bir site yaz</string>
     <string name="connsSystem">Shroudly kullanıyor</string>
-    <string name="connsSystemConfirm">Shroudly {host} adresini kendisi kullanıyor. Engellemek şifreli DNS\'i, güncellemeleri ya da son çare yolunu bozabilir, siteler açılmayabilir. Yine de engellensin mi?</string>
     <string name="connsTitle">Siteye göre bağlantılar</string>
+    <string name="dnsAroundAndroid">Bu cihazda uygulamaların ad sorgularını başka bir şey cevaplıyor (Özel DNS ya da bir DNS uygulaması), bu yüzden engelli uygulamalar açılmayabilir. Ayarlar → Ağ → Özel DNS\'te Kapalı ya da Otomatik\'i seç, varsa DNS uygulamasını kapat, sonra Shroudly\'yi yeniden başlat.</string>
     <string name="dnsErrorEmpty">Sunucunun adresini yaz, örneğin {example}.</string>
     <string name="dnsErrorHost">Bu bir IP adresi ya da sunucu adı değil; {example} gibi yaz.</string>
     <string name="dnsErrorPort">Port 1 ile 65535 arasında bir sayı olmalı.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Shroudly\'yi atlayan uygulamalar</string>
     <string name="excludedAppsCount">Shroudly\'yi atlayan uygulamalar: {count}</string>
     <string name="excludedAppsDesc">Trafikleri Shroudly\'ye uğramadan doğrudan çıkar: örneğin buna ihtiyacı olmayan bir oyun.</string>
+    <string name="followCodeshare">Shroudly\'yi yapan Codeshare</string>
+    <string name="followDesc">Engeller, yeni sürümler ve aşma yolları hakkındaki haberler önce burada. Takip etmek ve paylaşmak, Shroudly\'nin ona ihtiyacı olan insanlara ulaşmasının yolu ve hiçbir şeye mal olmaz.</string>
+    <string name="followDeveloper">Shroudly\'nin geliştiricisi Umut Bayraktar</string>
+    <string name="followTitle">Shroudly\'yi takip et</string>
+    <string name="followTv">Bunları telefonunda ya da bilgisayarında aç:</string>
     <string name="helpNudgeBodyPhone">Ücretsiz bir uygulama, interneti sansürlenen ülkelerdeki insanların engelleri aşmak için bu telefonun bağlantısının küçük bir kısmını kullanmasını sağlar. Senin için güvenli: telefonuna ya da ağına ulaşamazlar, açtıkları siteler senin adresini hiçbir zaman görmez.</string>
     <string name="helpNudgeShow">Göster</string>
     <string name="helpNudgeTitle">Sansürlü ülkelerdeki insanlara yardım etmek ister misin?</string>
@@ -157,6 +162,7 @@
     <string name="language">Dil</string>
     <string name="languageSystem">Sistem varsayılanı</string>
     <string name="lastResort">Hiçbir şey işe yaramazsa: Tor ağı</string>
+    <string name="lastResortAsks">Shroudly ilk kez kullanmadan önce sana sorar.</string>
     <string name="lastResortDesc">Hiçbir tekniğin açamadığı bir site Tor üzerinden açılır; Tor\'a Snowflake ile, yani gönüllülerin bağlantılarıyla ulaşılır (“Sansürlü ülkelerdeki insanlara yardım et”i açan herkes de bunlardan). Daha yavaştır ve bazı siteler Tor\'dan gelenlere captcha gösterir. Tor yalnızca bir site gerektirdiğinde başlar.</string>
     <string name="lastResortFailed">Tor ağına ulaşılamadı; bir site gerektirdiğinde yeniden denenecek</string>
     <string name="lastResortOwnServer">Kendi sunucun ayarlıyken kullanılmaz: her site o sunucudan geçer.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">Başka yolla açılmayan siteler için Tor ağına bağlanılıyor… %{progress}</string>
     <string name="linkReleases">Sürüm notları</string>
     <string name="linkSourceCode">GitHub’daki kaynak kodu</string>
+    <string name="linkWebsite">Codeshare web sitesi</string>
     <string name="madeBy">Bir Codeshare Technology Ltd ürünü</string>
     <string name="nationalOnlyBody">Dünyanın geri kalanıyla bağlantı kesik; ülke içindeki siteler hâlâ açılıyor. Hiçbir uygulama ya da VPN bunu aşamaz. Bağlantı geri geldiğinde Shroudly kendiliğinden devam eder.</string>
     <string name="nationalOnlyHelp">Hâlâ ne işe yarar</string>
     <string name="nationalOnlyTitle">Sadece ülkenin kendi ağı çalışıyor</string>
+    <string name="navFollow">Takip et</string>
     <string name="navInfo">Hakkında</string>
     <string name="navProtection">Koruma</string>
     <string name="navSettings">Ayarlar</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">cevap veriyor ama üzerinden hiçbir site gelmedi</string>
     <string name="protected_">Korunuyor</string>
     <string name="protectionStopped">Koruma durduruldu</string>
+    <string name="reopenAppsHint">Önceden açık olan uygulamalar: biri bağlanmazsa onu kapatıp bir kez yeniden aç.</string>
     <string name="searchApps">Uygulama ara</string>
     <string name="shareApp">Shroudly\'yi paylaş</string>
     <string name="shareAppText">Engelli siteleri ve uygulamaları açmak için Android\'e Shroudly {version}. Kurmak için bu dosyayı aç; telefon sorarsa bu kaynaktan uygulama yüklemeye izin ver.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Shroudly\'yi destekle</string>
     <string name="tagline">Görünmez. Durdurulamaz.</string>
     <string name="testing">Test ediliyor…</string>
+    <string name="torAskCard">Bu ağda hiçbir teknik {host} sitesini açamadı. Shroudly onu Tor ağı üzerinden açabilir: çok daha yavaştır (sayfalar ve videolar yavaş yüklenir) ve bazı siteler captcha ister. Cevabın hatırlanır; Ayarlar\'dan değiştirebilirsin.</string>
+    <string name="torAskNo">Hayır</string>
+    <string name="torAskNotice">Bu ağda hiçbir teknik {host} sitesini açamadı. Shroudly onu son çaresi olan Tor ağı üzerinden açabilir, ama çok daha yavaş. İzin vermek ya da reddetmek için Shroudly\'yi aç.</string>
+    <string name="torAskTitle">{host} Tor üzerinden açılsın mı?</string>
+    <string name="torAskYes">Tor\'u kullan</string>
+    <string name="torUsedPhone">{host} yalnızca Shroudly\'nin son çaresi olan Tor ağı üzerinden açıldı: bu ağda başka hiçbir yol işe yaramadı. Daha yavaştır ve bazı siteler doğrulama (captcha) ister; diğer uygulamaların ve sitelerin eskisi gibi çalışır.</string>
+    <string name="torUsedTv">{host} yalnızca Shroudly\'nin son çaresi olan Tor ağı üzerinden açıldı. Oradaki videolar yavaş ya da düşük kalitede yüklenebilir; diğer uygulamaların eskisi gibi çalışır.</string>
     <string name="totalCount">Toplam: {count}</string>
     <string name="updAvailable">Sürüm {version} kullanılabilir</string>
     <string name="updDownload">İndir ve kur</string>
@@ -247,7 +263,7 @@
     <string name="upload">Yükleme</string>
     <string name="uptime">Çalışma süresi</string>
     <string name="versionLabel">Sürüm {version}</string>
-    <string name="whatsNewAndroid">Siteye göre bağlantılar: Shroudly\'den neyin geçtiğini, iki yöndeki verisiyle gör ve istediğin siteyi engelle (#74).\nEngellemek o sitenin bağlantılarını hemen keser; liste senin cihazında kalır.</string>
+    <string name="whatsNewAndroid">Bağlantılar: Shroudly\'nin kendi ihtiyaç duyduğu adresler (DNS\'i, Tor, kendi siteleri) artık yanlışlıkla engellenemiyor.\nShroudly\'yi takip et: önce geliştiricinin hesapları geliyor; haberler ve acil duyurular orada paylaşılıyor.</string>
     <string name="whatsNewOk">Tamam</string>
     <string name="whatsNewTitle">{version} sürümünde yenilikler</string>
 </resources>

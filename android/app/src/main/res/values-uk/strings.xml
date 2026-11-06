@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">Пошук або сайт для блокування</string>
     <string name="connsSystem">використовує Shroudly</string>
-    <string name="connsSystemConfirm">Shroudly сам використовує {host}. Блокування може зламати шифрований DNS, оновлення або останній вихід, і сайти можуть перестати відкриватися. Усе одно заблокувати?</string>
     <string name="connsTitle">З\'єднання за сайтами</string>
+    <string name="dnsAroundAndroid">На цьому пристрої запити імен у застосунків обробляє щось інше (приватний DNS або DNS-застосунок), тож заблоковані застосунки можуть не відкриватися. У Налаштуваннях → Мережа → Приватний DNS виберіть «Вимкнено» або «Автоматично», закрийте DNS-застосунки й знову запустіть Shroudly.</string>
     <string name="dnsErrorEmpty">Введіть адресу сервера, наприклад {example}.</string>
     <string name="dnsErrorHost">Це не IP-адреса й не ім’я сервера; введіть її як {example}.</string>
     <string name="dnsErrorPort">Порт має бути числом від 1 до 65535.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Застосунки в обхід Shroudly</string>
     <string name="excludedAppsCount">Застосунки в обхід Shroudly: {count}</string>
     <string name="excludedAppsDesc">Їхній трафік іде напряму, повз Shroudly: наприклад, гра, якій він не потрібен.</string>
+    <string name="followCodeshare">Codeshare, творці Shroudly</string>
+    <string name="followDesc">Новини про блокування, нові версії та способи обходу — першими. Підписки й поширення допомагають Shroudly дістатися до тих, кому він потрібен, і нічого не коштують.</string>
+    <string name="followDeveloper">Умут Байрактар, розробник Shroudly</string>
+    <string name="followTitle">Стежити за Shroudly</string>
+    <string name="followTv">Відкрийте їх на телефоні чи комп’ютері:</string>
     <string name="helpNudgeBodyPhone">Безкоштовна програма дає людям у країнах, де цензурують інтернет, використовувати трохи підключення цього телефона, щоб обходити блокування. Для вас це безпечно: вони не можуть дістатися ні вашого телефона, ні вашої мережі, а сайти, які вони відкривають, ніколи не бачать вашої адреси.</string>
     <string name="helpNudgeShow">Показати</string>
     <string name="helpNudgeTitle">Допомагати людям у країнах із цензурою?</string>
@@ -157,6 +162,7 @@
     <string name="language">Мова</string>
     <string name="languageSystem">Як у системі</string>
     <string name="lastResort">Коли ніщо інше не допомагає: мережа Tor</string>
+    <string name="lastResortAsks">Shroudly запитає вас перед першим використанням.</string>
     <string name="lastResortDesc">Сайт, який не відкрила жодна техніка, іде через Tor, а до Tor — через Snowflake: з\'єднання волонтерів, серед них усіх, хто ввімкнув «Допомагати людям у країнах із цензурою». Повільніше, і деякі сайти просять у відвідувачів із Tor пройти капчу. Tor запускається лише тоді, коли він потрібен сайту.</string>
     <string name="lastResortFailed">Не вдалося підключитися до мережі Tor; нова спроба, коли вона знадобиться сайту</string>
     <string name="lastResortOwnServer">Не використовується, поки задано ваш власний сервер: через нього йдуть усі сайти.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">Підключення до мережі Tor для сайтів, що не відкрилися інакше… {progress}%</string>
     <string name="linkReleases">Примітки до випусків</string>
     <string name="linkSourceCode">Вихідний код на GitHub</string>
+    <string name="linkWebsite">Сайт Codeshare</string>
     <string name="madeBy">Продукт Codeshare Technology Ltd</string>
     <string name="nationalOnlyBody">Зв’язок із рештою світу відрізано; сайти всередині країни ще відкриваються. Жоден застосунок чи VPN цього не обійде. Коли зв’язок повернеться, Shroudly продовжить сам.</string>
     <string name="nationalOnlyHelp">Що ще може допомогти</string>
     <string name="nationalOnlyTitle">Працює лише мережа цієї країни</string>
+    <string name="navFollow">Стежити</string>
     <string name="navInfo">Про програму</string>
     <string name="navProtection">Захист</string>
     <string name="navSettings">Параметри</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">він відповідає, але жоден сайт через нього не відкрився</string>
     <string name="protected_">Захищено</string>
     <string name="protectionStopped">Захист вимкнено</string>
+    <string name="reopenAppsHint">Застосунки, відкриті раніше: якщо якийсь не підключається, закрийте його й відкрийте знову.</string>
     <string name="searchApps">Пошук застосунків</string>
     <string name="shareApp">Поділитися Shroudly</string>
     <string name="shareAppText">Shroudly {version} для Android — відкриває заблоковані сайти й застосунки. Щоб установити, відкрийте цей файл; якщо телефон запитає, дозвольте встановлення застосунків із цього джерела.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Підтримати Shroudly</string>
     <string name="tagline">Непомітний. Нестримний.</string>
     <string name="testing">Перевірка…</string>
+    <string name="torAskCard">Жоден спосіб не відкрив {host} у цій мережі. Shroudly може відкрити його через мережу Tor: набагато повільніше (сторінки й відео вантажаться повільно), а деякі сайти просять пройти капчу. Вашу відповідь запам\'ятовано; її можна змінити в Налаштуваннях.</string>
+    <string name="torAskNo">Ні</string>
+    <string name="torAskNotice">Жоден спосіб не відкрив {host} у цій мережі. Shroudly може відкрити його через мережу Tor, свій останній вихід, але набагато повільніше. Відкрийте Shroudly, щоб дозволити або відмовитися.</string>
+    <string name="torAskTitle">Відкрити {host} через Tor?</string>
+    <string name="torAskYes">Використати Tor</string>
+    <string name="torUsedPhone">{host} відкрився лише через мережу Tor — останній спосіб Shroudly: у цій мережі більше нічого не спрацювало. Це повільніше, і деякі сайти просять капчу; інші застосунки й сайти працюють як раніше.</string>
+    <string name="torUsedTv">{host} відкрився лише через мережу Tor — останній спосіб Shroudly. Відео звідти можуть вантажитися повільно або в гіршій якості; інші застосунки працюють як раніше.</string>
     <string name="totalCount">Усього: {count}</string>
     <string name="updAvailable">Доступна версія {version}</string>
     <string name="updDownload">Завантажити та встановити</string>
@@ -247,7 +263,7 @@
     <string name="upload">Вивантаження</string>
     <string name="uptime">Час роботи</string>
     <string name="versionLabel">Версія {version}</string>
-    <string name="whatsNewAndroid">З\'єднання за сайтами: що проходить через Shroudly, з даними в обидва боки, і блокування будь-якого сайту (#74).\nБлокування одразу обриває з\'єднання сайту; список зберігається на вашому пристрої.</string>
+    <string name="whatsNewAndroid">Підключення: адреси, потрібні самому Shroudly (його DNS, Tor, його сайти), більше не можна заблокувати помилково.\nСтежити за Shroudly: спершу акаунти розробника — там публікуються новини й термінові повідомлення.</string>
     <string name="whatsNewOk">Зрозуміло</string>
     <string name="whatsNewTitle">Що нового у {version}</string>
 </resources>

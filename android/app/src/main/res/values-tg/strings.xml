@@ -121,8 +121,8 @@
     <string name="connsRouteTor">Tor</string>
     <string name="connsSearch">Ҷустуҷӯ ё сайтро барои манъ нависед</string>
     <string name="connsSystem">Shroudly истифода мебарад</string>
-    <string name="connsSystemConfirm">Shroudly {host}-ро худаш истифода мебарад. Манъ кардан метавонад DNS-и рамзгузоришуда, навсозиҳо ё роҳи охиринро вайрон кунад ва сайтҳо кушода нашаванд. Бо вуҷуди ин манъ шавад?</string>
     <string name="connsTitle">Пайвастҳо аз рӯи сайт</string>
+    <string name="dnsAroundAndroid">Дар ин дастгоҳ ба дархостҳои номи барномаҳо чизи дигар ҷавоб медиҳад (DNS-и хусусӣ ё барномаи DNS), бинобар ин барномаҳои басташуда шояд кушода нашаванд. Дар Танзимот → Шабака → DNS-и хусусӣ «Хомӯш» ё «Худкор»-ро интихоб кунед, барномаҳои DNS-ро пӯшед ва Shroudly-ро аз нав оғоз кунед.</string>
     <string name="dnsErrorEmpty">Суроғаи серверро нависед, масалан {example}.</string>
     <string name="dnsErrorHost">Ин на суроғаи IP ва на номи сервер аст; онро мисли {example} нависед.</string>
     <string name="dnsErrorPort">Порт бояд адад аз 1 то 65535 бошад.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">Барномаҳое, ки Shroudly-ро давр мезананд</string>
     <string name="excludedAppsCount">Барномаҳое, ки Shroudly-ро давр мезананд: {count}</string>
     <string name="excludedAppsDesc">Трафики онҳо бе гузаштан аз Shroudly мустақим мебарояд: масалан, бозие, ки ба он ниёз надорад.</string>
+    <string name="followCodeshare">Codeshare, ки Shroudly-ро месозад</string>
+    <string name="followDesc">Хабарҳо дар бораи бандишҳо, версияҳои нав ва роҳҳои гузаштан аввал дар ин ҷо. Пайгирӣ ва мубодила ба Shroudly кӯмак мекунад, ки ба онҳое, ки ба он ниёз доранд, бирасад ва ройгон аст.</string>
+    <string name="followDeveloper">Умут Байрақтар, таҳиягари Shroudly</string>
+    <string name="followTitle">Shroudly-ро пайгирӣ кунед</string>
+    <string name="followTv">Инҳоро дар телефон ё компютери худ кушоед:</string>
     <string name="helpNudgeBodyPhone">Барномаи ройгон ба одамон дар кишварҳое, ки интернетро сензура мекунанд, имкон медиҳад барои гузаштан аз манъҳо қисми хурди пайвасти ин телефонро истифода баранд. Барои шумо бехатар аст: онҳо ба телефон ё шабакаи шумо дастрасӣ надоранд ва сайтҳое, ки мекушоянд, ҳеҷ гоҳ суроғаи шуморо намебинанд.</string>
     <string name="helpNudgeShow">Нишон додан</string>
     <string name="helpNudgeTitle">Ба одамон дар кишварҳои сензурадор кӯмак мекунед?</string>
@@ -157,6 +162,7 @@
     <string name="language">Забон</string>
     <string name="languageSystem">Мисли система</string>
     <string name="lastResort">Вақте ки чизи дигар кор намекунад: шабакаи Tor</string>
+    <string name="lastResortAsks">Shroudly пеш аз истифодаи нахустин аз шумо мепурсад.</string>
     <string name="lastResortDesc">Сайте, ки ҳеҷ як усул кушода натавонист, тавассути Tor кушода мешавад, ва ба Tor тавассути Snowflake, яъне пайвастҳои ихтиёриён мерасад (дар байни онҳо ҳамаи онҳое, ки «Ба мардуми кишварҳои сензурашуда кӯмак кардан»-ро фаъол кардаанд). Сусттар аст ва баъзе сайтҳо аз меҳмонони Tor капча мепурсанд. Tor танҳо вақте оғоз мешавад, ки сайт ба он ниёз дорад.</string>
     <string name="lastResortFailed">Ба шабакаи Tor расидан нашуд; вақте ки сайт ниёз дорад, дубора кӯшиш мешавад</string>
     <string name="lastResortOwnServer">Ҳангоме ки сервери худатон танзим шудааст, истифода намешавад: ҳамаи сайтҳо аз он сервер мегузаранд.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">Барои сайтҳое, ки бо роҳи дигар кушода намешаванд, ба шабакаи Tor пайваст шуда истодааст… {progress}%</string>
     <string name="linkReleases">Тавсифи версияҳо</string>
     <string name="linkSourceCode">Коди манбаъ дар GitHub</string>
+    <string name="linkWebsite">Сомонаи Codeshare</string>
     <string name="madeBy">Маҳсули Codeshare Technology Ltd</string>
     <string name="nationalOnlyBody">Пайваст бо дигар ҷаҳон бурида шудааст; сайтҳои дохили кишвар ҳоло кушода мешаванд. Ягон барнома ё VPN инро гузашта наметавонад. Вақте пайваст бармегардад, Shroudly худаш идома медиҳад.</string>
     <string name="nationalOnlyHelp">Боз чӣ кӯмак карда метавонад</string>
     <string name="nationalOnlyTitle">Танҳо шабакаи ҳамин кишвар кор мекунад</string>
+    <string name="navFollow">Пайгирӣ</string>
     <string name="navInfo">Маълумот</string>
     <string name="navProtection">Ҳимоя</string>
     <string name="navSettings">Танзимот</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">он ҷавоб медиҳад, вале тавассути он ягон сайт кушода нашуд</string>
     <string name="protected_">Ҳимоя шудааст</string>
     <string name="protectionStopped">Ҳимоя қатъ шуд</string>
+    <string name="reopenAppsHint">Барномаҳое, ки пештар кушода буданд: агар яке пайваст нашавад, онро бандед ва як бор аз нав кушоед.</string>
     <string name="searchApps">Ҷустуҷӯи барнома</string>
     <string name="shareApp">Мубодилаи Shroudly</string>
     <string name="shareAppText">Shroudly {version} барои Android, барои кушодани сайтҳо ва барномаҳои басташуда. Барои насб ин файлро кушоед; агар телефон пурсад, ба насби барномаҳо аз ин манбаъ иҷозат диҳед.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">Дастгирии Shroudly</string>
     <string name="tagline">Ноаён. Боздоштнашаванда.</string>
     <string name="testing">Санҷиш…</string>
+    <string name="torAskCard">Дар ин шабака ягон усул {host}-ро накушод. Shroudly метавонад онро тавассути шабакаи Tor кушояд: хеле сусттар (саҳифаҳо ва видеоҳо суст бор мешаванд) ва баъзе сомонаҳо captcha мепурсанд. Ҷавоби шумо нигоҳ дошта мешавад; онро дар Танзимот иваз карда метавонед.</string>
+    <string name="torAskNo">Не</string>
+    <string name="torAskNotice">Дар ин шабака ягон усул {host}-ро накушод. Shroudly метавонад онро тавассути шабакаи Tor, роҳи охирини худ, кушояд, вале хеле сусттар. Барои иҷозат додан ё рад кардан Shroudly-ро кушоед.</string>
+    <string name="torAskTitle">{host} тавассути Tor кушода шавад?</string>
+    <string name="torAskYes">Истифодаи Tor</string>
+    <string name="torUsedPhone">{host} танҳо тавассути шабакаи Tor кушода шуд — роҳи охирини Shroudly: дар ин шабака чизи дигар кор накард. Ин сусттар аст ва баъзе сайтҳо капча мепурсанд; дигар барномаҳо ва сайтҳо мисли пештара кор мекунанд.</string>
+    <string name="torUsedTv">{host} танҳо тавассути шабакаи Tor кушода шуд — роҳи охирини Shroudly. Видеоҳои он метавонанд суст ё бо сифати пасттар бор шаванд; дигар барномаҳо мисли пештара кор мекунанд.</string>
     <string name="totalCount">Ҳамагӣ: {count}</string>
     <string name="updAvailable">Версияи {version} дастрас аст</string>
     <string name="updDownload">Боргирӣ ва насб</string>
@@ -247,7 +263,7 @@
     <string name="upload">Ирсол</string>
     <string name="uptime">Вақти кор</string>
     <string name="versionLabel">Версияи {version}</string>
-    <string name="whatsNewAndroid">Пайвастҳо аз рӯи сайт: бинед, ки чӣ тавассути Shroudly мегузарад, бо маълумоти ҳарду самт, ва ҳар сайтро манъ кунед (#74).\nМанъ кардан пайвастҳои сайтро фавран мебурад; рӯйхат дар дастгоҳи шумо мемонад.</string>
+    <string name="whatsNewAndroid">Пайвастҳо: номҳое, ки ба худи Shroudly лозиманд (DNS, Tor, сомонаҳои худаш), дигар иштибоҳан баста намешаванд.\nShroudly-ро пайгирӣ кунед: аввал ҳисобҳои таҳиягар — хабарҳо ва огоҳиҳои фаврӣ он ҷо нашр мешаванд.</string>
     <string name="whatsNewOk">Фаҳмо</string>
     <string name="whatsNewTitle">Навигариҳои {version}</string>
 </resources>

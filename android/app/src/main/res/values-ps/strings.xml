@@ -121,8 +121,8 @@
     <string name="connsRouteTor">ټور</string>
     <string name="connsSearch">ولټوئ یا د بندولو لپاره سایټ ولیکئ</string>
     <string name="connsSystem">Shroudly یې کاروي</string>
-    <string name="connsSystemConfirm">Shroudly پخپله {host} کاروي. بندول یې کېدای شي کوډ شوی DNS، تازه کول یا وروستۍ لاره خرابه کړي او سایټونه پرانیستل ونشي. بیا هم بند شي؟</string>
     <string name="connsTitle">د سایټ له مخې اتصالونه</string>
+    <string name="dnsAroundAndroid">په دې وسیله کې د اپونو د نوم پوښتنو ته بل شی ځواب ورکوي (خصوصي DNS یا د DNS اپ)، نو ښايي بند اپونه پرانیستل نشي. په امستنو ← شبکه ← خصوصي DNS کې «بند» یا «اتومات» وټاکئ، د DNS اپونه وتړئ، بیا Shroudly له سره پیل کړئ.</string>
     <string name="dnsErrorEmpty">د سرور پته ولیکئ، لکه {example}.</string>
     <string name="dnsErrorHost">دا نه IP پته ده او نه د سرور نوم؛ داسې یې ولیکئ لکه {example}.</string>
     <string name="dnsErrorPort">پورټ باید له 1 څخه تر 65535 پورې یو شمېر وي.</string>
@@ -147,6 +147,11 @@
     <string name="excludedApps">هغه اپونه چې له Shroudly څخه نه تېرېږي</string>
     <string name="excludedAppsCount">هغه اپونه چې له Shroudly څخه نه تېرېږي: {count}</string>
     <string name="excludedAppsDesc">د هغوی ټرافیک له Shroudly پرته مستقیم وځي: د بېلګې په توګه یوه لوبه چې ورته اړتیا نه لري.</string>
+    <string name="followCodeshare">Codeshare، چې Shroudly جوړوي</string>
+    <string name="followDesc">د بندیزونو، نویو نسخو او د تېرېدو د لارو خبرونه تر ټولو مخکې. تعقیبول او شریکول هغه لار ده چې Shroudly اړو خلکو ته رسوي، او هېڅ لګښت نه لري.</string>
+    <string name="followDeveloper">اوموت بیرقدار، د Shroudly جوړونکی</string>
+    <string name="followTitle">Shroudly تعقیب کړئ</string>
+    <string name="followTv">دا په خپل تلیفون یا کمپیوټر کې پرانیزئ:</string>
     <string name="helpNudgeBodyPhone">یو وړیا اپ د هغو هېوادونو خلکو ته چې انټرنېټ سانسوروي اجازه ورکوي چې د بندیزونو د تېرولو لپاره د دې ټیلیفون د اړیکې یوه کوچنۍ برخه وکاروي. ستاسو لپاره خوندي ده: دوی ستاسو ټیلیفون یا شبکې ته نه شي رسېدای، او هغه سایټونه چې دوی یې پرانیزي هېڅکله ستاسو پته نه ګوري.</string>
     <string name="helpNudgeShow">وښیه</string>
     <string name="helpNudgeTitle">غواړئ په سانسور شویو هېوادونو کې له خلکو سره مرسته وکړئ؟</string>
@@ -157,6 +162,7 @@
     <string name="language">ژبه</string>
     <string name="languageSystem">د سیسټم ژبه</string>
     <string name="lastResort">کله چې بل هېڅ شی کار ونکړي: د ټور شبکه</string>
+    <string name="lastResortAsks">Shroudly د لومړي ځل کارولو مخکې له تاسو پوښتنه کوي.</string>
     <string name="lastResortDesc">هغه سایټ چې هېڅ تخنیک یې نشي پرانیستلی د ټور له لارې پرانیستل کېږي، او ټور ته د سنوفلېک له لارې رسېږي: د رضاکارانو اتصالونه، په دوی کې ټول هغه کسان چې «د سانسور شويو هېوادونو له خلکو سره مرسته» یې فعاله کړې. ورو دی، او ځینې سایټونه له هغو کسانو چې له ټور څخه راځي کېپچا غواړي. ټور یوازې هغه وخت پیلېږي چې سایټ ورته اړتیا ولري.</string>
     <string name="lastResortFailed">د ټور شبکې ته ونه رسېدو؛ کله چې سایټ ورته اړتیا ولري بیا هڅه کېږي</string>
     <string name="lastResortOwnServer">تر هغه چې ستاسو خپل سرور ټاکل شوی وي نه کارول کېږي: ټول سایټونه له هماغه سرور څخه تېرېږي.</string>
@@ -164,10 +170,12 @@
     <string name="lastResortStarting" formatted="false">د هغو سایټونو لپاره چې په بله لاره نه پرانیستل کېږي د ټور شبکې سره نښلول کېږي… ‎{progress}%</string>
     <string name="linkReleases">د خپرونو یادښتونه</string>
     <string name="linkSourceCode">په GitHub کې سرچینه کوډ</string>
+    <string name="linkWebsite">د Codeshare وېبسایټ</string>
     <string name="madeBy">د Codeshare Technology Ltd محصول</string>
     <string name="nationalOnlyBody">د نړۍ له پاتې برخې سره اړیکه پرې ده؛ د هېواد دننه سایټونه لا خلاصېږي. هېڅ اپ یا VPN له دې نه شي تېرېدای. کله چې اړیکه بېرته راشي، Shroudly پخپله دوام ورکوي.</string>
     <string name="nationalOnlyHelp">نور څه مرسته کولی شي</string>
     <string name="nationalOnlyTitle">یوازې د دې هېواد شبکه کار کوي</string>
+    <string name="navFollow">تعقیب</string>
     <string name="navInfo">په اړه</string>
     <string name="navProtection">ساتنه</string>
     <string name="navSettings">امستنې</string>
@@ -197,6 +205,7 @@
     <string name="ownServerWhyTls">ځواب ورکوي، خو د هغه له لارې هېڅ سایټ پرانیستل نه شو</string>
     <string name="protected_">خوندي</string>
     <string name="protectionStopped">ساتنه ودرول شوه</string>
+    <string name="reopenAppsHint">هغه اپونه چې مخکې پرانیستي وو: که یو نښلي نه، وې تړئ او یو ځل بیا یې پرانیزئ.</string>
     <string name="searchApps">اپ ولټوئ</string>
     <string name="shareApp">Shroudly شریکول</string>
     <string name="shareAppText">د اندروید لپاره Shroudly {version}، د بندو سایټونو او اپونو د پرانیستلو لپاره. د نصبولو لپاره دا فایل پرانیزئ؛ که تلیفون وپوښتل، له دې سرچینې د اپونو نصبولو ته اجازه ورکړئ.</string>
@@ -236,6 +245,13 @@
     <string name="supportTitle">د Shroudly ملاتړ وکړئ</string>
     <string name="tagline">نالیدلی. نه درېدونکی.</string>
     <string name="testing">ازمویل کېږي…</string>
+    <string name="torAskCard">په دې شبکه کې هېڅ تخنیک {host} پرانیستی نه شو. Shroudly کولی شي هغه د Tor شبکې له لارې پرانیزي: ډېر ورو (پاڼې او ویډیوګانې ورو پورته کېږي)، او ځینې سایټونه captcha غواړي. ستاسو ځواب ساتل کېږي؛ په ترتیباتو کې یې بدلولی شئ.</string>
+    <string name="torAskNo">نه</string>
+    <string name="torAskNotice">په دې شبکه کې هېڅ تخنیک {host} پرانیستی نه شو. Shroudly کولی شي هغه د Tor شبکې له لارې، چې وروستۍ لاره یې ده، پرانیزي، خو ډېر ورو. د اجازې یا انکار لپاره Shroudly پرانیزئ.</string>
+    <string name="torAskTitle">آیا {host} د Tor له لارې پرانیستل شي؟</string>
+    <string name="torAskYes">Tor وکاروئ</string>
+    <string name="torUsedPhone">{host} یوازې د Tor شبکې له لارې پرانیستل شو، چې د Shroudly وروستۍ لار ده: په دې شبکه کې بل هېڅ شی کار ونه کړ. دا ورو ده او ځینې سایټونه کیپچا غواړي؛ ستاسو نور اپونه او سایټونه لکه پخوا کار کوي.</string>
+    <string name="torUsedTv">{host} یوازې د Tor شبکې له لارې پرانیستل شو، چې د Shroudly وروستۍ لار ده. د هغه ویډیوګانې ښايي ورو یا په ټیټ کیفیت پورته شي؛ ستاسو نور اپونه لکه پخوا کار کوي.</string>
     <string name="totalCount">ټول: {count}</string>
     <string name="updAvailable">{version} نسخه شته</string>
     <string name="updDownload">ډاونلوډ او نصب کړئ</string>
@@ -247,7 +263,7 @@
     <string name="upload">اپلوډ</string>
     <string name="uptime">د کار موده</string>
     <string name="versionLabel">نسخه {version}</string>
-    <string name="whatsNewAndroid">د سایټ له مخې اتصالونه: وګورئ چې له Shroudly څه تېرېږي، د دواړو لورو ډیټا سره، او هر سایټ چې غواړئ بند یې کړئ (#74).\nبندول د سایټ اتصالونه سمدستي پرې کوي؛ لېست ستاسو په وسیله پاتې کېږي.</string>
+    <string name="whatsNewAndroid">اړیکې: هغه نومونه چې پخپله Shroudly ته اړین دي (د هغه DNS، Tor، خپل سایټونه) نور په تېروتنه نه بندېږي.\nShroudly تعقیب کړئ: لومړی د جوړونکي حسابونه؛ خبرونه او بیړني خبرتیاوې هلته خپرېږي.</string>
     <string name="whatsNewOk">پوه شوم</string>
     <string name="whatsNewTitle">په {version} کې نوي څه</string>
 </resources>

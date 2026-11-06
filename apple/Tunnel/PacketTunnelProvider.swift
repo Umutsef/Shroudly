@@ -38,6 +38,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private let queue = DispatchQueue(label: "me.codeshare.shroudly.tunnel")
     // The last way out (TorRoute): Tor, for sites nothing else opened.
+    /* Apps' lookups go around the tunnel (Engine.onDnsAround); reset at stop. */
+    private var dnsAround = false
+    /* A site needs Tor and the user has not said yes yet (TorNotice.ask):
+     * its name, for the app's card; nil when nothing is asked. */
+    private var torAsk: String?
     private lazy var torRoute: TorRoute = {
         let t = TorRoute(log: { [weak self] in self?.log($0) })
         t.usedCount = { [weak self] in ((self?.engine?.lastStats?["fallback"]) as? NSNumber)?.int64Value ?? 0 }
@@ -161,6 +166,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         doh?.stop(); doh = nil
         ssClient?.stop(); ssClient = nil
         torRoute.stop()
+        TorNotice.reset()
+        dnsAround = false
+        torAsk = nil
         upstreamLine = nil
         clearOwnServerDown()
         return clean
@@ -198,10 +206,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 let path = FileManager.default.temporaryDirectory.appendingPathComponent("engine-fallback").path
                 if torRoute.prepare(file: path) { fallbackPath = path }
             }
-            e.onFallback = { [weak self] ok, what in
+            e.onDnsAround = { [weak self] _ in
                 guard let self else { return }
-                if ok { self.logSite("\(what): no technique got through; opened through the last way out (Tor)") }
-                else if what != "file unusable" { self.torRoute.need() }
+                self.queue.async { self.dnsAround = true }
+                TorNotice.post(key: TorNotice.dnsTextKey, id: "dns-around")
+            }
+            e.onFallback = { [weak self] ok, what, host in
+                guard let self else { return }
+                if ok { self.logSite("\(what): no technique got through; opened through the last way out (Tor)"); TorNotice.used(what) }
+                else if what != "file unusable" {
+                    // Tor only once the user said yes (issue #77); until then asked.
+                    if TorNotice.approved() { self.torRoute.need() }
+                    else {
+                        self.queue.async {
+                            if self.torAsk == nil { self.log("The last way out: a site needs Tor; asking before it starts") }
+                            self.torAsk = host.isEmpty ? (self.torAsk ?? "") : host.lowercased()
+                        }
+                        TorNotice.ask(host)
+                    }
+                }
             }
             let args = EngineArgs.make(port: p, dohPort: dohPort, settings: settings, authFile: authPath, blockIps: blockIps, upstreamFile: upstreamPath,
                                        fallbackFile: fallbackPath)
@@ -446,7 +469,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         engineRestarts = 0
         hevRestarts = 0
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + Self.watchEvery, repeating: Self.watchEvery)
+        // A few seconds of leeway: the system wakes for it together with
+        // other work instead of on its own (battery), and a hung engine is
+        // still found within half a minute.
+        t.schedule(deadline: .now() + Self.watchEvery, repeating: Self.watchEvery, leeway: .seconds(5))
         t.setEventHandler { [weak self] in self?.check() }
         t.resume()
         watch = t
@@ -528,6 +554,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 return
             case .blocks:
                 applyBlocks()
+            case .torYes:
+                torAsk = nil
+                log("The last way out: allowed by the user; Tor starts and stays allowed")
+                if engine != nil && !stopping { torRoute.need() }
             case .adblock:
                 applyAdblock(fetchAfter: 0)
             case .count:
@@ -544,6 +574,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     var out: [String: Any] = ["stats": s]
                     // The last way out at work, for a line under the status.
                     if let t = torRoute.status { out["lastResort"] = t }
+                    // A DNS profile or app goes around the tunnel (ContentView's card).
+                    if dnsAround { out["dnsAround"] = true }
+                    // A site needs Tor, not yet allowed (ContentView's card).
+                    if let a = torAsk { out["torAsk"] = a }
                     completionHandler?(try? JSONSerialization.data(withJSONObject: out))
                 }
                 return
