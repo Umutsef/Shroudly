@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createLanguageSelection } from './languageSelection';
 // One file per language, locales/<code>.json. English is always there (the
 // fallback for any missing string); any other language is loaded when it is
 // chosen.
@@ -122,19 +123,28 @@ const ISOLATE_END = '⁩';   // POP DIRECTIONAL ISOLATE
 export function LanguageProvider({ children }) {
   const [language, setLanguageState] = useState('en');
   const [isLoaded, setIsLoaded] = useState(false);
+  const selection = useRef(null);
+  if (!selection.current) {
+    selection.current = createLanguageSelection({
+      load: loadDictionary,
+      apply: (code) => { setLanguageState(code); setIsLoaded(true); },
+      persist: async (code) => {
+        if (typeof window === 'undefined') return;
+        if (window.electron?.setSetting) {
+          try { await window.electron.setSetting('language', code); } catch {}
+        }
+        try { window.localStorage.setItem(STORAGE_KEY, code); } catch {}
+      },
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
     // Never leave the UI blank if the IPC bridge hangs.
     const fallback = setTimeout(() => { if (!cancelled) setIsLoaded(true); }, 1500);
-    (async () => {
-      let code = (await loadSavedLanguage()) || (await detectSystemLanguage()) || 'en';
-      if (!(await loadDictionary(code))) code = 'en';
-      if (cancelled) return;
-      setLanguageState(code);
-      setIsLoaded(true);
-    })();
-    return () => { cancelled = true; clearTimeout(fallback); };
+    selection.current.initialize(async () =>
+      (await loadSavedLanguage()) || (await detectSystemLanguage()) || 'en');
+    return () => { cancelled = true; selection.current.cancel(); clearTimeout(fallback); };
   }, []);
 
   const meta = availableLanguages.find((l) => l.code === language) || availableLanguages[0];
@@ -148,13 +158,7 @@ export function LanguageProvider({ children }) {
 
   const setLanguage = useCallback(async (lang) => {
     if (!availableLanguages.some((item) => item.code === lang)) return;
-    if (!(await loadDictionary(lang))) return;
-    setLanguageState(lang);
-    if (typeof window === 'undefined') return;
-    if (window.electron?.setSetting) {
-      try { await window.electron.setSetting('language', lang); } catch {}
-    }
-    try { window.localStorage.setItem(STORAGE_KEY, lang); } catch {}
+    await selection.current.select(lang);
   }, []);
 
   /* t(name) or t(name, { param: value }) — "{param}" placeholders are replaced.
