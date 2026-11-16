@@ -58,7 +58,7 @@ class AutomationReceiver : BroadcastReceiver() {
         }
         if (!on) {
             if (Protection.state == Protection.State.OFF) return
-            Protector.stop(context)
+            Protector.stop(context, "another app (automation)")
             ShroudlyVpnService.log("Automation: protection off, asked by another app")
             return
         }
@@ -110,13 +110,13 @@ class AutomationReceiver : BroadcastReceiver() {
             ShroudlyVpnService.channels(ctx)
             val start = PendingIntent.getActivity(
                 ctx, 5,
-                Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_START, true)
+                Intent(ctx, HomeActivity::class.java).putExtra(MainActivity.EXTRA_START, true)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val body = ctx.getString(text)
             val n = Notification.Builder(ctx, ShroudlyVpnService.ALERT_CHANNEL)
-                .setSmallIcon(R.drawable.ic_shield)
+                .setSmallIcon(R.drawable.ic_stat_logo)
                 .setContentTitle(ctx.getString(R.string.androidAutomationNotStarted))
                 .setContentText(body)
                 .setStyle(Notification.BigTextStyle().bigText(body))

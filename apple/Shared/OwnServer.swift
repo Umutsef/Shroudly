@@ -165,13 +165,38 @@ enum OwnServer {
         return nil
     }
 
+    /* The country Cloudflare places that address in ("loc=IT"), or nil
+     * (issue #60). XX and T1 (Tor) are no country. */
+    static func traceLoc(_ body: String) -> String? {
+        for raw in body.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" }) {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.hasPrefix("loc=") else { continue }
+            let cc = String(line.dropFirst(4))
+            guard cc.count == 2, cc.unicodeScalars.allSatisfy({ $0.value >= 65 && $0.value <= 90 }), cc != "XX", cc != "T1" else { return nil }
+            return cc
+        }
+        return nil
+    }
+
+    /* "80.174.118.60 · 🇮🇹 Italy": the address with its country's flag and
+     * name in the app's language; the address alone without a country. */
+    static func withPlace(_ ip: String, _ cc: String?, language: String = Bundle.main.preferredLocalizations.first ?? "en") -> String {
+        guard let cc, cc.count == 2, cc.unicodeScalars.allSatisfy({ $0.value >= 65 && $0.value <= 90 }) else { return ip }
+        var flag = ""
+        for s in cc.unicodeScalars { if let u = UnicodeScalar(0x1F1E6 + s.value - 65) { flag.unicodeScalars.append(u) } }
+        let name = Locale(identifier: language).localizedString(forRegionCode: cc) ?? cc
+        return "\(ip) · \(flag) \(name)"
+    }
+
     /* The address sites see now, asked of Cloudflare's trace page the way any
      * app's connection goes (through the tunnel, the engine and the server). */
     static func exitAddress(session: URLSession = .shared, timeout: TimeInterval = 10) async -> String? {
         var req = URLRequest(url: URL(string: "https://cloudflare.com/cdn-cgi/trace")!, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout)
         req.httpMethod = "GET"
         guard let (data, resp) = try? await session.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return traceIp(String(decoding: data, as: UTF8.self))
+        let page = String(decoding: data, as: UTF8.self)
+        guard let ip = traceIp(page) else { return nil }
+        return withPlace(ip, traceLoc(page))
     }
 
     /* The engine's --upstream-file, readable by this process alone (0600
@@ -207,6 +232,32 @@ enum OwnServer {
 
     static func whyCode(_ text: String?) -> String { text.flatMap { why[$0] } ?? "protocol" }
 
+    /* A link's address that only its own network reaches (192.168.x.x, 10.x,
+     * a provider's shared 100.64.x.x, fe80::, fc00::): a link "Share my
+     * connection" made where no way in from the internet opened, used from
+     * another country. Such a link failing says why ("local"). This device
+     * itself (127.x, ::1) is not a network. Never a lookup by name. */
+    static func localHost(_ host: String?) -> Bool {
+        var h = (host ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        if h.hasPrefix("[") && h.hasSuffix("]") { h = String(h.dropFirst().dropLast()) }
+        var v4 = in_addr()
+        if h.withCString({ inet_pton(AF_INET, $0, &v4) }) == 1 {
+            let b = withUnsafeBytes(of: &v4) { Array($0) }
+            if b[0] == 127 || (b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 0) { return false }
+            return b[0] == 10 || (b[0] == 172 && (b[1] & 0xf0) == 16) || (b[0] == 192 && b[1] == 168)
+                || (b[0] == 169 && b[1] == 254) || (b[0] == 100 && (b[1] & 0xc0) == 64)
+        }
+        var v6 = in6_addr()
+        if h.contains(":"), h.withCString({ inet_pton(AF_INET6, $0, &v6) }) == 1 {
+            let b = withUnsafeBytes(of: &v6) { Array($0) }
+            return (b[0] & 0xfe) == 0xfc || (b[0] == 0xfe && (b[1] & 0xc0) == 0x80)
+        }
+        return false
+    }
+
+    /* The reason, or "local" for such a link. */
+    static func localIf(_ code: String, host: String?) -> String { localHost(host) ? "local" : code }
+
     static func whyKey(_ code: String?) -> String {
         switch code {
         case "noAnswer": return "ownServerWhyNoAnswer"
@@ -215,6 +266,7 @@ enum OwnServer {
         case "refused": return "ownServerWhyRefused"
         case "silent": return "ownServerWhySilent"
         case "tls": return "ownServerWhyTls"
+        case "local": return "ownServerWhyLocal"
         default: return "ownServerWhyProtocol"
         }
     }
@@ -239,6 +291,7 @@ enum OwnServer {
         case "ownServerWhyRefused": return tr("ownServerWhyRefused")
         case "ownServerWhySilent": return tr("ownServerWhySilent")
         case "ownServerWhyTls": return tr("ownServerWhyTls")
+        case "ownServerWhyLocal": return tr("ownServerWhyLocal")
         default: return tr("ownServerWhyProtocol")
         }
     }

@@ -48,8 +48,13 @@ function lookup4(host, ms) {
 
 /* { country, host } of the first site of a country that answers, or null.
  * opts.lookup and opts.handshake stand in for the network in tests. */
-function domesticAnswers({ ms = 5000, lookup = lookup4, hs = handshake, sites = DOMESTIC } = {}) {
-  const list = Object.entries(sites).flatMap(([country, hosts]) => hosts.map((host) => ({ country, host })));
+function domesticAnswers({ ms = 5000, lookup = lookup4, hs = handshake, sites = DOMESTIC, tz = systemZone() } = {}) {
+  // Only the countries it can be: a site of another country of the list
+  // answering alone is that site abroad and reachable, not this network cut
+  // off from the world (Iran's digikala.com answering a phone in Turkey for
+  // a moment while the rest did not: SR-XM82).
+  const list = Object.entries(sites).filter(([country]) => plausible(country, tz))
+    .flatMap(([country, hosts]) => hosts.map((host) => ({ country, host })));
   return new Promise((resolve) => {
     let left = list.length;
     let done = false;
@@ -92,12 +97,38 @@ function systemZone() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
 }
 
-/* The country the user is in, as well as it is known: the one whose own
- * network answered in a shutdown (remembered), else the one the system's
- * time zone is in, else null. */
-function homeCountry({ remembered, tz = systemZone() } = {}) {
-  if (remembered && DOMESTIC[remembered]) return remembered;
+/* The country the user is in, as well as it is known: the one the system's
+ * time zone is in, else the one whose own network answered in a shutdown
+ * (remembered), else null. The zone first: the user chose it, while a site
+ * of another country answering in a bad moment once made a phone in Turkey
+ * "Iranian" for good, its decoys Iranian names (SR-XM82). */
+function zoneCountry(tz) {
   for (const [cc, zones] of Object.entries(ZONES)) if (zones.includes(tz)) return cc;
+  return null;
+}
+
+/* A time zone that names no place (UTC, GMT, Etc/...): it says nothing of
+ * the country. Any other zone does, even one of a country not on the list. */
+function genericZone(tz) {
+  return !tz || /^(UTC|GMT|UCT|Zulu|Universal|Greenwich|Etc\/.*)$/i.test(String(tz));
+}
+
+/* Whether cc's own sites answering alone can mean a national-only network
+ * here: only when the time zone is cc's, or names no place. A zone of
+ * another country, on the list or not, says it is only abroad (Iranian and
+ * Russian sites answering a phone in Qatar for a moment, SR-F040). */
+function plausible(cc, tz = systemZone()) {
+  const z = zoneCountry(tz);
+  return z === cc || (z === null && genericZone(tz));
+}
+
+function homeCountry({ remembered, tz = systemZone() } = {}) {
+  const z = zoneCountry(tz);
+  if (z) return z;
+  // Remembered from a shutdown only where the zone names no place: a zone of
+  // a country not on the list (Asia/Qatar) is that country, not a remembered
+  // one (SR-F040: a phone in Qatar kept Iranian decoys).
+  if (remembered && DOMESTIC[remembered] && genericZone(tz)) return remembered;
   return null;
 }
 
@@ -109,4 +140,10 @@ function decoyNames(country) {
   return country && DOMESTIC[country] ? DOMESTIC[country].slice(0, 8) : [];
 }
 
-module.exports = { domesticAnswers, DOMESTIC, ZONES, homeCountry, decoyNames };
+/* Where Tor itself is blocked (components/helpNudge.js NOT_FROM, HelpNudge.kt,
+ * HelpNudge.swift: the same list): helping others is not offered there and a
+ * Snowflake proxy left on does not run; the user is among those who need it. */
+const TOR_BLOCKED = ['BY', 'CN', 'IR', 'MM', 'RU', 'TM'];
+const torBlocked = (country) => !!country && TOR_BLOCKED.includes(String(country).toUpperCase());
+
+module.exports = { domesticAnswers, DOMESTIC, ZONES, homeCountry, plausible, decoyNames, TOR_BLOCKED, torBlocked };

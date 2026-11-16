@@ -43,6 +43,10 @@ final class Engine {
      * connections keep coming by address, none by name (dns_way in
      * core/src/engine.c). Once a run, naming a site. */
     var onDnsAround: ((String) -> Void)?
+    /* A site no technique opened (not one whose server turned the
+     * handshake down itself, not a raw address), one cut each time, or one
+     * with no address that answers: its name. */
+    var onBlocked: ((String) -> Void)?
     /* The engine's verdict on a fetched ad list (ADBLOCK-CHECK): ok, error. */
     var onAdblockCheck: ((Bool, String?) -> Void)?
     private(set) var lastError: String?
@@ -224,8 +228,17 @@ final class Engine {
             let ok = (obj["ok"] as? NSNumber)?.intValue == 1
             if ok { logSite("engine: \(line)") } else { log("engine: last way out: \(obj["why"] as? String ?? "?")") }
             onFallback?(ok, ok ? (obj["host"] as? String ?? "") : (obj["why"] as? String ?? ""), obj["host"] as? String ?? "")
+        case "blocked":
+            logSite("engine: \(line)")
+            if obj["raw"] as? Bool != true, obj["alert"] as? Bool != true, let host = obj["host"] as? String, !host.isEmpty { onBlocked?(host) }
+        case "cut", "unreachable":
+            // Also sites the last way out would have carried: cut each time once
+            // connected, or with no address that answers (YouTube and Instagram in
+            // Iran). Not a name that does not resolve: it may not exist at all.
+            logSite("engine: \(line)")
+            if obj["raw"] as? Bool != true, obj["stage"] as? String != "dns", let host = obj["host"] as? String, !host.isEmpty { onBlocked?(host) }
         default:
-            // Events about one site (bypass, blocked, seen...) name it.
+            // Events about one site (bypass, seen...) name it.
             logSite("engine: \(line)")
         }
     }

@@ -61,11 +61,21 @@ class FollowActivity : Activity() {
         textAlignment = View.TEXT_ALIGNMENT_VIEW_START
     }
 
+    // A sideways swipe goes to the tab beside it (Chrome.Swipe).
+    private val swipe by lazy { Chrome.Swipe(this, { Chrome.Tab.FOLLOW }) { Chrome.go(this, it) } }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        swipe.feed(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         Accent.apply(this)
         super.onCreate(savedInstanceState)
         val tv = Tv.isTv(this)
-        val root = LinearLayout(this).apply {
+        // The main screen's column: at most content_max_width, in the middle
+        // of a tablet or a TV.
+        val root = Column(this, null).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16f), dp(16f), dp(16f), dp(16f))
         }
@@ -75,15 +85,26 @@ class FollowActivity : Activity() {
         // The developer's first: news, new versions and urgent notices go there.
         group(root, getString(R.string.followDeveloper), DEVELOPER, tv)
         group(root, getString(R.string.followCodeshare), CODESHARE, tv)
-        val scroll = ScrollView(this).apply { id = View.generateViewId(); addView(root); setBackgroundColor(getColor(R.color.bg)) }
-        setContentView(scroll)
+        val scroll = ScrollView(this).apply {
+            id = View.generateViewId()
+            addView(root, android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.view.Gravity.CENTER_HORIZONTAL))
+            setBackgroundColor(getColor(R.color.bg))
+            defaultFocusHighlightEnabled = false
+        }
+        // The desktop's frame (Chrome): its top, the page, the six tabs with
+        // Follow chosen.
+        val frame = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(getColor(R.color.bg)) }
+        frame.addView(Chrome.header(this).first)
+        frame.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        frame.addView(Chrome.bottomBar(this, Chrome.Tab.FOLLOW) { Chrome.go(this, it) })
+        setContentView(frame)
         Tv.rings(window)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
                 @Suppress("DEPRECATION")
                 window.setDecorFitsSystemWindows(false)
             }
-            scroll.setOnApplyWindowInsetsListener { v, insets ->
+            frame.setOnApplyWindowInsetsListener { v, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
                 v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
                 insets
@@ -93,7 +114,14 @@ class FollowActivity : Activity() {
 
     private fun group(root: LinearLayout, title: String, links: List<Link>, tv: Boolean) {
         root.addView(label(12f, R.color.text_faint, true).apply { text = title; setPadding(0, dp(12f), 0, dp(4f)) })
-        for (l in links) {
+        // Two by two, as the desktop's (components/InfoPanel.js); one a row on a TV.
+        val perRow = if (tv) 1 else 2
+        var line: LinearLayout? = null
+        for ((i, l) in links.withIndex()) {
+            if (i % perRow == 0) {
+                line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                root.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8f) })
+            }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -104,13 +132,18 @@ class FollowActivity : Activity() {
                 contentDescription = "${l.name} ${l.handle}"
                 setOnClickListener { open(l) }
             }
-            row.addView(label(15f, R.color.text).apply { text = l.name })
-            row.addView(label(12.5f, R.color.text_faint).apply {
+            row.addView(label(14f, R.color.text).apply { text = l.name; maxLines = 1 })
+            row.addView(label(12f, R.color.text_faint).apply {
                 text = if (tv) l.url.removePrefix("https://") else l.handle
                 textDirection = View.TEXT_DIRECTION_LTR
+                maxLines = 1
             })
-            root.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6f) })
+            line!!.addView(row, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                if (i % perRow == 1) marginStart = dp(8f)
+            })
         }
+        // An odd last one keeps half the width.
+        if (perRow == 2 && links.size % 2 == 1) line?.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { marginStart = dp(8f) })
     }
 
     private fun open(l: Link) {

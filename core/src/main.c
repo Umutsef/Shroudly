@@ -166,6 +166,7 @@ static void usage(void) {
     "  --adblock <path>      block the names of an ad and tracker list (adblock.h)\n"
     "  --allow <domain>      never block it, nor a name under it (repeatable)\n"
     "  --raw-local           tests: search techniques for non-TLS streams on local addresses too\n"
+    "  --local-unacked       tests: a request sent to a local address counts as not acknowledged\n"
     "  --advanced            packet-layer backend (needs elevation)\n"
     "  --fake-repeats <n>    Advanced: decoy datagrams per Discord voice flow\n"
     "  --no-quic-block       Advanced: keep QUIC (do not force browsers to TCP)\n"
@@ -228,6 +229,7 @@ int engine_main(int argc, char **argv, FILE *in, FILE *out, int embedded) {
     else if (!strcmp(argv[i], "--ipv4-only")) g_cfg.ipv4_only = 1;
     else if (!strcmp(argv[i], "--drop-quic")) g_cfg.drop_quic = 1;
     else if (!strcmp(argv[i], "--raw-local")) g_cfg.raw_local = 1;
+    else if (!strcmp(argv[i], "--local-unacked")) g_cfg.local_unacked = 1;
     else if (!strcmp(argv[i], "--doh-ip") && i+1<argc) strncpy(g_doh_fwd_ip, argv[++i], sizeof(g_doh_fwd_ip)-1);
     else if (!strcmp(argv[i], "--doh-port") && i+1<argc) g_doh_fwd_port = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--dns-strict")) dns_strict = 1;
@@ -256,6 +258,7 @@ int engine_main(int argc, char **argv, FILE *in, FILE *out, int embedded) {
     else if (!strcmp(argv[i], "--adblock") && i+1<argc) strncpy(g_adblock_file, argv[++i], sizeof(g_adblock_file)-1);
     else if (!strcmp(argv[i], "--allow") && i+1<argc) adblock_allow(argv[++i]);   /* a bad one is left out */
     else if (!strcmp(argv[i], "--auth-file") && i+1<argc) strncpy(g_auth_file, argv[++i], sizeof(g_auth_file)-1);
+    else if (!strcmp(argv[i], "--http-open")) g_cfg.http_open = 1;
     else if (!strcmp(argv[i], "--upstream-file") && i+1<argc) strncpy(g_upstream_file, argv[++i], sizeof(g_upstream_file)-1);
     else if (!strcmp(argv[i], "--fallback-file") && i+1<argc) strncpy(g_fallback_file, argv[++i], sizeof(g_fallback_file)-1);
     else if (!strcmp(argv[i], "--status-file") && i+1<argc) strncpy(g_status_file, argv[++i], sizeof(g_status_file)-1);
@@ -414,6 +417,22 @@ int engine_main(int argc, char **argv, FILE *in, FILE *out, int embedded) {
       if (ended >= 0) engine_printf("{\"type\":\"block\",\"ok\":1,\"ended\":%d}\n", ended);
     }
     else if (!strncmp(line, "UNBLOCK ", 8)) conns_unblock(line + 8);
+    else if (!strcmp(line, "TOR-CLEAR")) conns_tor_clear(engine_fallback_drop);
+    else if (!strncmp(line, "TOR ", 4)) {
+      int ended = conns_tor_add(line + 4);
+      if (ended >= 0) engine_printf("{\"type\":\"tor_site\",\"ok\":1,\"ended\":%d}\n", ended);
+    }
+    else if (!strncmp(line, "UNTOR ", 6)) { conns_tor_del(line + 6); engine_fallback_drop(line + 6); }
+    else if (!strcmp(line, "ONLY-CLEAR")) conns_only_clear();
+    else if (!strncmp(line, "ONLY-MODE ", 10)) conns_only_mode(line[10] == '1');
+    else if (!strncmp(line, "ONLY ", 5)) conns_only_add(line + 5);
+    else if (!strncmp(line, "UNONLY ", 7)) conns_only_del(line + 7);
+    else if (!strncmp(line, "AVOID ", 6)) {
+      /* AVOID <host> <kinds> <seconds ago>: what a server could not take. */
+      char host[256]; unsigned mask = 0; unsigned long long secs = 0;
+      if (sscanf(line + 6, "%255s %u %llu", host, &mask, &secs) == 3)
+        engine_avoid(host, mask, (uint64_t)secs * 1000ull);
+    }
     else if (!strncmp(line, "LEARN ", 6)) {
       /* LEARN <host> <technique> <seconds ago>: what an earlier run learned. */
       char host[256], tech[64]; unsigned long long secs = 0;

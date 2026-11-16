@@ -15,6 +15,16 @@
  * (as the ad and tracker list does) and ends the open ones at once. The list
  * is the app's to keep: it gives it again at every start. UNBLOCK lifts one,
  * BLOCK-CLEAR all.
+ *
+ * TOR <name> sends that name and every name under it through the last way
+ * out (Tor) when it is set and may be used, for a site that turns the
+ * user's country away itself (a geo-block no technique changes); the open
+ * connections end so the next ones go there. TOR <address>/<bits> does the
+ * same for a range of addresses (an app that connects to its servers by
+ * address, as Telegram does: the app picked in "Apps through Tor"). UNTOR
+ * lifts one, TOR-CLEAR all. ONLY <name> (with ONLY-MODE 1) makes Shroudly work on the listed
+ * names alone: every other one goes out as it is, untouched, with the
+ * network's DNS. ONLY-CLEAR empties the list, ONLY-MODE 0 ends the mode.
  */
 #ifndef SHROUDLY_CONNS_H
 #define SHROUDLY_CONNS_H
@@ -26,7 +36,9 @@
 #define CONNS_ACTIVE 1024
 #define CONNS_BLOCK  512
 
-enum { CONN_DIRECT = 0, CONN_TECHNIQUE = 1, CONN_SERVER = 2, CONN_TOR = 3 };
+/* CONN_UDP: datagrams (QUIC, games, calls), as they are: no technique works
+ * on them, so a slow app over UDP shows here (--drop-quic moves QUIC to TCP). */
+enum { CONN_DIRECT = 0, CONN_TECHNIQUE = 1, CONN_SERVER = 2, CONN_TOR = 3, CONN_UDP = 4 };
 
 void conns_init(void);
 /* A new connection for `host`: its slot, or -1 when the table is full
@@ -47,9 +59,33 @@ int  conns_block(const char *host);
 int  conns_unblock(const char *host);
 void conns_block_clear(void);
 
+/* 1 if the user sends this name (or one above it) through Tor. */
+/* Whether host is an address in range ("address/bits"). */
+int  conns_in_range(const char *range, const char *host);
+int  conns_tor(const char *host);
+int  conns_tor_add(const char *host);
+int  conns_tor_del(const char *host);
+/* Empties the list; each(entry), if given, for every name and range it had
+ * (the last way out forgets having carried them: TOR-CLEAR then the list
+ * again is how an app on Apple systems sends a change). */
+void conns_tor_clear(void (*each)(const char *));
+/* Only listed names worked on: 1 if this one is left as it is. */
+int  conns_only_skip(const char *host);
+int  conns_only_add(const char *host);
+int  conns_only_del(const char *host);
+void conns_only_clear(void);
+void conns_only_mode(int on);
+
 /* The list as JSON lines: {"type":"conn",...} per name, most recent first,
  * then {"type":"conns_end","n":N}. */
 void conns_emit(void);
+/* A name the ad and tracker list stopped (a connection or a lookup): kept
+ * among the last CONNS_ADS, with how often and when, and listed by
+ * conns_emit as {"type":"ad",...} rows before conns_end, so the app can show
+ * what the list stops and let one through (a link shortener's page, say,
+ * that the list blocks as a whole: until 2.6.78 nothing anywhere said so). */
+#define CONNS_ADS 48
+void conns_ad(const char *host);
 /* Everything forgotten (a new run in the same process). */
 void conns_forget(void);
 

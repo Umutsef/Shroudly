@@ -14,6 +14,7 @@
   [![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](#)
   [![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white)](#android)
   [![Android TV](https://img.shields.io/badge/Android%20TV-3DDC84?logo=android&logoColor=white)](#android-tv-and-google-tv)
+  [![Google Play](https://img.shields.io/badge/Google%20Play-Get%20it-414141?logo=googleplay&logoColor=white)](https://play.google.com/store/apps/details?id=me.codeshare.shroudly)
   [![iOS](https://img.shields.io/badge/iPhone%20%26%20iPad-000000?logo=apple)](#iphone-ipad-mac-and-apple-tv)
   [![Apple TV](https://img.shields.io/badge/Apple%20TV-000000?logo=apple)](#iphone-ipad-mac-and-apple-tv)
   [![Donate](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/donate?campaign_id=BV7WTVT9VJQQ6)
@@ -24,11 +25,11 @@
 
   <br/>
 
-  <a href="https://www.youtube.com/watch?v=Mb4Zkq1din8">
-    <img src="https://img.youtube.com/vi/Mb4Zkq1din8/maxresdefault.jpg" alt="Shroudly launch video" width="720"/>
+  <a href="https://youtu.be/MP0l_vBUirE">
+    <img src="https://img.youtube.com/vi/MP0l_vBUirE/maxresdefault.jpg" alt="Shroudly: unblock Discord, YouTube and Telegram without a VPN (video)" width="720"/>
   </a>
 
-  ▶ **[Watch the 2-minute launch video](https://www.youtube.com/watch?v=Mb4Zkq1din8)**
+  ▶ **[Watch the video: unblock Discord, YouTube and Telegram without a VPN (6 min)](https://youtu.be/MP0l_vBUirE)**
 
   ★ **[Follow Shroudly](#follow-shroudly)**: [Instagram](https://instagram.com/umutxyp) · [YouTube](https://youtube.com/@umutxyp) · [TikTok](https://tiktok.com/@umutxyp) · [X](https://x.com/devbayraktar) · [Telegram](https://t.me/umutxyp) · [Discord](https://discord.gg/BhdgVfsFVC)
 
@@ -787,7 +788,7 @@ directly. That list maintains itself:
 | macOS | **macOS 12 Monterey** (Intel or Apple Silicon) | Older versions are told so by macOS itself rather than failing to launch. |
 | Linux | **glibc 2.28+** — Debian 10, Ubuntu 20.04, Fedora 29 or newer (Ubuntu 18.04 has glibc 2.27: Shroudly starts there, but Advanced mode does not) | AppImage (x64, ARM64, 32-bit ARM), plus native packages: .deb for Debian/Ubuntu (x64 and 32-bit ARM, armhf), .pacman for Arch/Manjaro, .rpm for Fedora/openSUSE/RHEL. 32-bit ARM (Raspberry Pi OS 32-bit) has everything but Advanced mode and Tor. The bypass engine itself only needs glibc 2.17, so it is never the limiting part. |
 | iPhone, iPad, Mac, Apple TV | **iOS 16**, **macOS 13**, **tvOS 17** or newer | The App Store (in review); an `.ipa` on the releases page for TrollStore or a paid developer account (not a free Apple ID) meanwhile ([details](#iphone-ipad-mac-and-apple-tv)). |
-| Android | **Android 8** or newer (phones, tablets, Android TV and Google TV; ARM 64/32-bit, x86_64) | Google Play (in review), or an APK from the releases page: the main APK runs on every device, 32-bit ARM phones included; the smaller *arm64* APK on 64-bit ARM phones only. It works as a VPN on the phone, so every app goes through Shroudly; no root needed. To keep another VPN app connected, Settings → Advanced → Mode → Proxy only. |
+| Android | **Android 8** or newer (phones, tablets, Android TV and Google TV; ARM 64/32-bit, x86_64) | [Google Play](https://play.google.com/store/apps/details?id=me.codeshare.shroudly), or an APK from the releases page: the main APK runs on every device, 32-bit ARM phones included; the smaller *arm64* APK on 64-bit ARM phones only. It works as a VPN on the phone, so every app goes through Shroudly; no root needed. To keep another VPN app connected, Settings → Advanced → Mode → Proxy only. |
 
 Advanced mode needs administrator rights, and is available on Windows and Linux only.
 
@@ -814,7 +815,7 @@ These links always download the newest version (see [Releases](https://github.co
 | **Fedora / openSUSE / RHEL** | [.rpm](https://shroudly.codeshare.me/dl/linux-rpm) | [AppImage](https://shroudly.codeshare.me/dl/linux-arm64) |
 | **Any Linux** | [AppImage](https://shroudly.codeshare.me/dl/linux-x64) | [AppImage](https://shroudly.codeshare.me/dl/linux-arm64) |
 | **32-bit ARM Linux** (Raspberry Pi OS 32-bit, armhf) | | [AppImage](https://shroudly.codeshare.me/dl/linux-armv7l) · [.deb](https://shroudly.codeshare.me/dl/linux-armhf-deb) |
-| **Android 8+, Android TV, Google TV** | [APK](https://shroudly.codeshare.me/dl/android) | [APK](https://shroudly.codeshare.me/dl/android) (one APK for every phone, tablet and TV) |
+| **Android 8+, Android TV, Google TV** | **[Google Play](https://play.google.com/store/apps/details?id=me.codeshare.shroudly)** · [APK](https://shroudly.codeshare.me/dl/android) | **[Google Play](https://play.google.com/store/apps/details?id=me.codeshare.shroudly)** · [APK](https://shroudly.codeshare.me/dl/android) (one APK for every phone, tablet and TV) |
 | **iPhone / iPad (iOS 16+)** | | [.ipa on the releases page](https://github.com/umutxyp/Shroudly/releases/latest) (TrollStore, or a paid developer account; App Store soon) |
 
 - **Windows** — run the installer. On Windows 7, 8 or 8.1, use the Windows 7 and 8 installer (the Windows 10 one offers to download it).
@@ -824,7 +825,8 @@ These links always download the newest version (see [Releases](https://github.co
 - **Fedora / RHEL** — `sudo dnf install ./Shroudly-*-Linux-x86_64.rpm`
 - **openSUSE** — `sudo zypper install ./Shroudly-*-Linux-x86_64.rpm`
 - **AppImage** — `chmod +x Shroudly-*.AppImage` and run it.
-- **Android** — download `Shroudly-…-Android.apk` on the phone and open it.
+- **Android** — get it on [Google Play](https://play.google.com/store/apps/details?id=me.codeshare.shroudly) (updates come from Play), or
+  download `Shroudly-…-Android.apk` on the phone and open it.
   Android asks once to allow installs from your browser; then tap the big
   button and allow the VPN request. Every app on the phone, Discord and games
   included, then goes through Shroudly. The app tells you when a newer version
@@ -1098,7 +1100,7 @@ which the apps link under About and the App Store and Google Play link to. Shrou
 Technology Ltd; questions about privacy go to
 [contact@codeshare.me](mailto:contact@codeshare.me).
 
-Shroudly does not collect personal data. These are the only things that contact servers:
+Shroudly does not collect personal data; the only personal data that ever reaches us is a report you choose to send (below). These are the only things that contact servers:
 
 - **Live user count** (`shroudly.codeshare.me`): only while protection is on,
   and only if *Count me in the live total* is left on (in Settings on the
@@ -1212,6 +1214,41 @@ Shroudly does not collect personal data. These are the only things that contact 
 Games and apps mode contacts nothing of its own: it only carries what the
 programs using it were going to send anyway.
 
+**Reports you send** (*Something not working?*, under the main button, on
+every Shroudly: computer, Android phone and TV, iPhone, iPad, Mac, Apple TV).
+Only when you press **Send**, after the app shows what goes and you agree to
+send it, log included; nothing is ever sent by itself. A report holds what
+you write (50 to 1000 characters on what does not work; if you want, the site
+or app, your internet provider, your country and an email or Telegram name
+for an answer), the app's version, the system and its version, the device
+model and the app's language, and the app's log with what the app shows
+right now: the sites Shroudly did something to (a technique, Tor, your own
+server) and how, and the connections of common apps (Discord, YouTube,
+Instagram, WhatsApp, Telegram, games and the like) and whether Shroudly
+touched them, but not the other sites you visit; whether protection is on
+and working, what runs beside it and what Shroudly found about the network;
+the engine's counters; and every setting's value, those you never changed
+too (switches and choices only: your own server or DNS only as set or not,
+your lists only as how many entries; never a server's link, an address, a
+password, messages or what you read or type on a site). It goes to `codeshare.me` (Codeshare's
+server), through the protected connection while protection is on, which
+checks it and hands it to our own mail server, which emails it to Shroudly's
+developer and nothing else. It is never written to disk or a database on our
+servers and is not logged; only its reference number is. Cloudflare, which
+carries the site, says which country the request came from, and the internet
+provider the address belongs to (its network number and name) is looked up
+through Team Cymru's public IP-to-ASN service; both go into the email, the
+address itself does not. The email stays in the developer's mailbox until the
+developer deletes it, and is used only to fix what you reported or add what
+is missing. Each report gets a random reference number
+(`SR-XXXX-XXXX-XXXX`) to quote if you write to us; the app keeps the numbers
+you sent, with their dates, on your device only, for 60 days. One report an
+hour and three a day from a device; to stop floods, the server keeps, in
+memory only and for a day at most, a keyed hash of the address requests came
+from and when (never the address, and nothing survives a restart). To have a
+report deleted, write to [contact@codeshare.me](mailto:contact@codeshare.me)
+with its reference number.
+
 Which technique opened which blocked site is remembered on this computer
 only (in Shroudly's settings file, for 30 days at most), so the next start
 does not have to search again. Nothing of it is sent anywhere.
@@ -1270,7 +1307,10 @@ The privacy policies of the services involved:
 (updates, the site list),
 [Discord](https://discord.com/privacy) (Discord app mode, the autopilot's check),
 [Roblox](https://www.roblox.com/info/privacy) (the autopilot's check),
-[Cloudflare](https://www.cloudflare.com/privacypolicy/) (the live count's tunnel),
+[Cloudflare](https://www.cloudflare.com/privacypolicy/) (the live count's tunnel, and codeshare.me, which takes reports),
+[Amazon SES](https://aws.amazon.com/privacy/) (which carries our mail, a report's email included),
+[Google](https://policies.google.com/privacy) (Gmail, where the developer's mailbox is),
+[Team Cymru](https://www.team-cymru.com/privacy) (which internet provider a report came from),
 and the encrypted DNS resolvers:
 [Cloudflare 1.1.1.1](https://developers.cloudflare.com/1.1.1.1/privacy/public-dns-resolver/),
 [Google Public DNS](https://developers.google.com/speed/public-dns/privacy),
@@ -1359,7 +1399,7 @@ MIT — see [LICENSE](LICENSE).
 - [Electron](https://www.electronjs.org/), [Next.js](https://nextjs.org/), [Tailwind CSS](https://tailwindcss.com/)
 - Desync techniques inspired by the research behind `goodbyeDPI` and `zapret` — reimplemented independently in `shroudly-core`.
 - Censorship fingerprints from [OONI](https://ooni.org/)'s open [blocking-fingerprints](https://github.com/ooni/blocking-fingerprints) data.
-- [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) (MIT) carries the Android app's VPN traffic to the engine; [WinDivert](https://reqrypt.org/windivert.html) (LGPL) is Advanced mode's packet driver on Windows.
+- [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) (MIT) carries the Android app's VPN traffic to the engine; [WinDivert](https://github.com/basil00/WinDivert) (LGPL) is Advanced mode's packet driver on Windows.
 
 ---
 

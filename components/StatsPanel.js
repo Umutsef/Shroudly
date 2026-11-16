@@ -106,9 +106,11 @@ const NAME = /^(?=.{3,253}$)[a-z0-9-]+(\.[a-z0-9-]+)+$/;
  * way, how it went out; a site blocked here has its connections ended and
  * new ones refused (electron/engine-manager.js setBlocked). Names Shroudly
  * itself uses are marked, and blocking one asks first. */
+const needleOf = (q) => q.trim().toLowerCase();
+
 function Connections({ active }) {
   const { t } = useLanguage();
-  const [data, setData] = useState({ rows: [], blocked: [] });
+  const [data, setData] = useState({ rows: [], blocked: [], torSites: [] });
   const [q, setQ] = useState('');
   useEffect(() => {
     const e = typeof window !== 'undefined' ? window.electron : null;
@@ -127,12 +129,43 @@ function Connections({ active }) {
       if (r && r.ok) setData((d) => ({ ...d, blocked: r.blocked, rows: d.rows.map((x) => (x.host === host || x.host.endsWith(`.${host}`) ? { ...x, blocked: on ? 1 : 0, active: on ? 0 : x.active } : x)) }));
     } catch {}
   };
+  // Through Tor (the last way out): for a site that turns the user's
+  // country away itself; choosing it is the consent to Tor (main.js).
+  const torSite = async (host, on) => {
+    try {
+      const r = await window.electron.setTorSite(host, on);
+      if (r && r.ok) setData((d) => ({ ...d, torSites: r.torSites }));
+    } catch {}
+  };
+  // "Apps always through Tor": a whole app (its names, and its addresses
+  // for one that connects by address), picked once; the same consent.
+  const torApp = async (id, on) => {
+    try {
+      const r = await window.electron.setTorApp(id, on);
+      if (r && r.ok) setData((d) => ({ ...d, torApps: r.torApps, torAppNames: r.torAppNames }));
+    } catch {}
+  };
+  // A name the ad list stopped, let through (Settings → Sites never to block).
+  const allowAd = async (host) => {
+    try {
+      const r = await window.electron.allowAdName(host);
+      if (r && r.ok) setData((d) => ({ ...d, ads: r.ads }));
+    } catch {}
+  };
+  const ads = (data.ads || []).filter((a) => !needleOf(q) || a.host.includes(needleOf(q)));
+  const torApps = data.torApps || [];
+  const torSites = data.torSites || [];
+  const viaTor = (h) => torSites.some((n) => h === n || h.endsWith(`.${n}`));
+  // A name a picked app sends through Tor: that app's button brings it back.
+  const viaApp = (h) => (data.torAppNames || []).some((n) => h === n || h.endsWith(`.${n}`));
   const needle = q.trim().toLowerCase();
   const rows = data.rows.filter((r) => !needle || r.host.includes(needle)).slice(0, 100);
   const blockedOnly = (data.blocked || []).filter((h) => !data.rows.some((r) => r.host === h) && (!needle || h.includes(needle)));
   const canBlockTyped = NAME.test(needle) && !(data.blocked || []).includes(needle) && !data.rows.some((r) => r.host === needle)
     && !(data.ownNames || []).some((n) => needle === n || needle.endsWith(`.${n}`));
-  const route = (r) => (r.route === 'tor' ? t('connsRouteTor') : r.route === 'server' ? t('connsRouteServer') : r.route === 'technique' ? t('connsRouteTechnique') : null);
+  const canTorTyped = canBlockTyped && data.torOk && !viaTor(needle);
+  const torOnly = torSites.filter((h) => !data.rows.some((r) => r.host === h) && (!needle || h.includes(needle)));
+  const route = (r) => (r.route === 'tor' ? t('connsRouteTor') : r.route === 'server' ? t('connsRouteServer') : r.route === 'technique' ? t('connsRouteTechnique') : r.route === 'udp' ? 'UDP' : null);
   const badge = (text, color) => (
     <span className="shrink-0 rounded-full px-1.5 py-[1px] text-[10.5px] font-semibold" style={{ background: 'var(--surface-2)', color }}>{text}</span>
   );
@@ -142,16 +175,38 @@ function Connections({ active }) {
       <div>
         <p className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>{t('connsTitle')}</p>
         <p className="mt-0.5 text-[11.5px] leading-snug" style={{ color: 'var(--text-faint)' }}>{t('connsDesc')}</p>
+        {data.torOk && <p className="mt-1 text-[11.5px] leading-snug" style={{ color: 'var(--text-faint)' }}>{t('connsTorDesc')}</p>}
       </div>
+      {data.torOk && (data.torAppList || []).length > 0 && (
+        <div className="rounded-[8px] px-2.5 py-2" style={{ background: 'var(--surface-2)', border: '1px solid var(--line)' }}>
+          <p className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>{t('connsTorApps')}</p>
+          <p className="mt-0.5 text-[11px] leading-snug" style={{ color: 'var(--text-faint)' }}>{t('connsTorAppsDesc')}</p>
+          <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={t('connsTorApps')}>
+            {data.torAppList.map((a) => {
+              const on = torApps.includes(a.id);
+              return (
+                <button key={a.id} type="button" aria-pressed={on} onClick={() => torApp(a.id, !on)}
+                        className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+                        style={on ? { background: 'var(--accent)', color: 'var(--on-accent)' } : { background: 'var(--surface)', color: 'var(--text-dim)', border: '1px solid var(--line)' }}>
+                  {a.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <label className="flex items-center gap-2 rounded-[8px] px-2.5 py-1.5" style={{ background: 'var(--surface-2)', border: '1px solid var(--line)' }}>
         <SearchIcon className="h-3.5 w-3.5" style={{ color: 'var(--text-faint)' }} />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('connsSearch')} dir="ltr" spellCheck={false}
                className="min-w-0 flex-1 bg-transparent text-[12.5px] outline-none" style={{ color: 'var(--text)' }} />
       </label>
       {canBlockTyped && (
-        <button type="button" onClick={() => { block(needle, true); setQ(''); }} className={`${btn} self-start`}>{t('connsBlockName', { host: needle })}</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => { block(needle, true); setQ(''); }} className={btn}>{t('connsBlockName', { host: needle })}</button>
+          {canTorTyped && <button type="button" onClick={() => { torSite(needle, true); setQ(''); }} className={btn}>{t('connsTorName', { host: needle })}</button>}
+        </div>
       )}
-      {!rows.length && !blockedOnly.length && !canBlockTyped && (
+      {!rows.length && !blockedOnly.length && !torOnly.length && !canBlockTyped && (
         <p className="py-2 text-[12px]" style={{ color: 'var(--text-faint)' }}>{active ? t('connsEmpty') : t('statsInactiveHint')}</p>
       )}
       <div className="flex flex-col divide-y" style={{ borderColor: 'var(--line)' }}>
@@ -163,6 +218,7 @@ function Connections({ active }) {
                 <span className="truncate text-[12.5px] font-medium" dir="ltr" style={{ color: 'var(--text)' }} title={r.host}>{r.host}</span>
                 {r.system && badge(t('connsSystem'), 'var(--accent)')}
                 {route(r) && badge(route(r), 'var(--text-dim)')}
+                {(viaTor(r.host) || viaApp(r.host)) && r.route !== 'tor' && badge(t('connsTorChosen'), 'var(--accent)')}
               </div>
               <div className="num mt-0.5 flex flex-wrap gap-x-2.5 text-[11px]" dir="ltr" style={{ color: 'var(--text-faint)', justifyContent: 'flex-start' }}>
                 {r.blocked
@@ -173,9 +229,36 @@ function Connections({ active }) {
                     </>}
               </div>
             </div>
+            {!r.blocked && !r.system && data.torOk && !(viaApp(r.host) && !viaTor(r.host)) && (viaTor(r.host)
+              ? <button type="button" onClick={() => torSite(torSites.find((n) => r.host === n || r.host.endsWith(`.${n}`)), false)} className={btn} style={{ color: 'var(--accent)' }}>{t('connsTorBack')}</button>
+              : <button type="button" onClick={() => torSite(r.host, true)} className={btn}>{t('connsTor')}</button>)}
             {r.blocked
               ? <button type="button" onClick={() => block(r.host, false)} className={btn}>{t('connsAllow')}</button>
               : !r.system && <button type="button" onClick={() => block(r.host, true)} className={btn}>{t('connsBlock')}</button>}
+          </div>
+        ))}
+        {torOnly.map((h) => (
+          <div key={`t-${h}`} className="flex min-w-0 items-center gap-2 py-2">
+            <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: 'var(--accent)' }} />
+            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium" dir="ltr" style={{ color: 'var(--text)' }}>{h}</span>
+            <span className="text-[11px]" style={{ color: 'var(--accent)' }}>{t('connsTorChosen')}</span>
+            <button type="button" onClick={() => torSite(h, false)} className={btn}>{t('connsTorBack')}</button>
+          </div>
+        ))}
+        {ads.length > 0 && (
+          <div className="pt-3 pb-1">
+            <p className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>{t('connsAdsTitle')}</p>
+            <p className="mt-0.5 text-[11px] leading-snug" style={{ color: 'var(--text-faint)' }}>{t('connsAdsDesc')}</p>
+          </div>
+        )}
+        {ads.map((a) => (
+          <div key={`a-${a.host}`} className="flex min-w-0 items-center gap-2 py-2">
+            <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: 'var(--line)' }} />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-[12.5px] font-medium" dir="ltr" style={{ color: 'var(--text)' }} title={a.host}>{a.host}</span>
+              <span className="text-[11px]" style={{ color: 'var(--text-faint)' }}>{t('connsAdStopped', { count: a.count })}</span>
+            </div>
+            <button type="button" onClick={() => allowAd(a.host)} className={btn}>{t('connsAdAllow')}</button>
           </div>
         ))}
         {blockedOnly.map((h) => (

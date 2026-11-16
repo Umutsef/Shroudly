@@ -89,11 +89,12 @@ final class TunnelController: ObservableObject {
         }
         #endif
         do {
-            try m.connection.startVPNTunnel()
+            try m.connection.startVPNTunnel(options: TunnelStart.byApp)
             log.write("Start asked")
         } catch {
             log.write("Start: \(error.localizedDescription)")
             notice = "\(tr("startFailed")): \(error.localizedDescription)"
+            Report.fault()
         }
     }
 
@@ -119,6 +120,13 @@ final class TunnelController: ObservableObject {
         }
         guard !old.sameTunnel(as: new), phase == .on || phase == .starting else { return }
         log.write("Settings changed: starting protection again")
+        await restart()
+    }
+
+    /* New remote settings (RemoteConfig): the tunnel again with them, if on. */
+    func remoteChanged() async {
+        guard phase == .on || phase == .starting else { return }
+        log.write("Remote settings: protection starts again with them")
         await restart()
     }
 
@@ -187,10 +195,22 @@ final class TunnelController: ObservableObject {
         torAsk = nil
         if yes {
             AppGroup.defaults.set(true, forKey: "torApproved")
+            // Asked again with the last way out off (TorNotice.askAgainDue):
+            // on, and protection started again with it.
+            let store = SettingsStore()
+            let old = store.load()
+            if !old.torLastResort {
+                var new = old
+                new.torLastResort = true
+                store.save(new)
+                await settingsChanged(from: old, to: new)
+                return
+            }
             guard let session = manager?.connection as? NETunnelProviderSession else { return }
             try? session.sendProviderMessage(Data(ProviderMessage.torYes.rawValue.utf8)) { _ in }
         } else {
             AppGroup.defaults.set(false, forKey: "torApproved")
+            AppGroup.defaults.set(Date().timeIntervalSince1970, forKey: "torAskRest") // TorNotice.restKey: asked again after a day
             let store = SettingsStore()
             let old = store.load()
             var new = old
@@ -217,6 +237,25 @@ final class TunnelController: ObservableObject {
 
     /* The blocked names changed (Shared/Conns.swift): the running tunnel
      * gives them to the engine again. */
+    /* A site sent through Tor from the Connections list (the Mac): the
+     * user's consent to Tor, so the last way out is allowed, and turned on
+     * (protection started again with it) if it was off. */
+    func torSiteChanged(on: Bool) async {
+        if on {
+            AppGroup.defaults.set(true, forKey: "torApproved")
+            let store = SettingsStore()
+            let old = store.load()
+            if !old.torLastResort {
+                var new = old
+                new.torLastResort = true
+                store.save(new)
+                await settingsChanged(from: old, to: new)
+                return
+            }
+        }
+        blocksChanged()
+    }
+
     func blocksChanged() {
         guard phase == .on, let session = manager?.connection as? NETunnelProviderSession else { return }
         try? session.sendProviderMessage(Data(ProviderMessage.blocks.rawValue.utf8)) { _ in }
@@ -303,6 +342,10 @@ final class TunnelController: ObservableObject {
                 guard let self, self.phase == .off else { return }
                 let detail = error.map { ": \($0.localizedDescription)" } ?? ""
                 self.log.write("Protection ended\(detail)")
+                // Ended with an error (not the user switching the VPN off in
+                // the system's settings): Shroudly's own trouble, a report
+                // is offered for a day (Report.offered).
+                if error != nil { Report.fault() }
                 if before == .connecting {
                     self.notice = "\(tr("startFailed"))\(detail)"
                 } else {

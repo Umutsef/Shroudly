@@ -78,8 +78,11 @@ enum HelpNudge {
 
     /* Where the user is, as far as the app can tell: a shutdown seen there
      * (NetworkWatch keeps it), else the time zone's country among those above. */
+    /* The zone's country first: the user chose it, while a site of another
+     * country answering in a bad moment once made a phone in Turkey
+     * "Iranian" for good (SR-XM82). */
     static func country(remembered: String?, zone: String = TimeZone.current.identifier) -> String? {
-        remembered ?? zones[zone]
+        zones[zone] ?? (NationalNet.genericZone(zone) ? remembered : nil)
     }
 
     private enum Key {
@@ -104,12 +107,24 @@ enum HelpNudge {
         d.set(s.accepted, forKey: Key.accepted)
     }
 
+    /* Where Tor itself is blocked: helping others is not offered at all
+     * (the card, the Snowflake switch, Conduit's link), and a Snowflake
+     * proxy left on does not run; the user is among those who need it. */
+    static func torBlocked(_ country: String?) -> Bool {
+        guard let country else { return false }
+        return notFrom.contains(country.uppercased())
+    }
+    static func torBlockedHere(_ d: UserDefaults = .standard) -> Bool {
+        torBlocked(country(remembered: d.string(forKey: homeCountryKey)))
+    }
+
     /* Due now, for this user; the first look starts the count. */
-    static func due(_ d: UserDefaults = .standard, now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
+    static func due(_ d: UserDefaults = .standard, now: TimeInterval = Date().timeIntervalSince1970,
+                    zone: String = TimeZone.current.identifier) -> Bool {
         let kept = load(d)
         let s = begin(kept, now: now)
         if kept == nil { save(s, d) }
-        return isDue(s, now: now, country: country(remembered: d.string(forKey: homeCountryKey)))
+        return isDue(s, now: now, country: country(remembered: d.string(forKey: homeCountryKey), zone: zone))
     }
 
     static func refused(_ d: UserDefaults = .standard, now: TimeInterval = Date().timeIntervalSince1970) {

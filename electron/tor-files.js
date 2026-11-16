@@ -8,19 +8,31 @@
  * script (scripts/fetch-tor.js: Android) and the app (tor-download.js: the
  * computers fetch Tor the first time a site needs it, issue #75).
  */
-const VERSION = '16.0';
-const SOURCES = [
-  `https://dist.torproject.org/torbrowser/${VERSION}/`,
-  // The same files, for a network that will not reach the first.
-  `https://archive.torproject.org/tor-package-archive/torbrowser/${VERSION}/`,
+const VERSION = '16.0.1';
+// Android stays on 16.0: the Tor Project's Android build of 16.0.1 asks for
+// libz.so.1, which no Android has, so Tor ended with code 1 the moment it
+// started (2.6.80: Qatar, Iran, Jordan). scripts/fetch-tor.js now refuses
+// such a bundle; move on with a version whose Android build passes it.
+const ANDROID_VERSION = '16.0';
+const versionOf = (bundle) => (String(bundle).startsWith('android-') ? ANDROID_VERSION : VERSION);
+const sourcesFor = (version) => [
+  `https://dist.torproject.org/torbrowser/${version}/`,
+  // The same files on Shroudly's GitHub, for a network that cuts
+  // torproject.org (Russia: both names below cut, Tor never fetched, the
+  // last way out never there). Checked against the same pinned SHA-256, so
+  // only the Tor Project's own file is ever used. One release per version:
+  // tor-<version>, made when a version is pinned.
+  `https://github.com/umutxyp/Shroudly/releases/download/tor-${version}/`,
+  `https://archive.torproject.org/tor-package-archive/torbrowser/${version}/`,
 ];
+const SOURCES = sourcesFor(VERSION);
 const SHA256 = {
-  'macos-aarch64': 'b8da251eccbe9e82f3681ee3af3c97fb4291c4a4e153e5b824bde48a1117cd6a',
-  'windows-i686': '24036933df360e6581e26653eccb9f3d069ab1f5e0aa5b80e716cbf6030f84dc',
-  'macos-x86_64': '5b1860215c26f2d408392d1d79e798a2f81d65eb939510bb94c11f237bd0bfc3',
-  'linux-x86_64': 'cc950ebe9acb80188325c3a2cd8817def7dd7237d6fdcd861bb87b234a0cb2fd',
-  'linux-aarch64': 'bed98744e093a0dc3a22be0eecfdce7a33cb36866d3f15fcf011a35bf3513d0d',
-  'windows-x86_64': '2ee123e9167318a3742778ff704e75f01d4780f05a14522d451fe011011077c4',
+  'macos-aarch64': '0b7d022017c31e3f972d06465bcd7ac50feb66ac825547419a934914fe4bb156',
+  'windows-i686': '4aa4bed8397349612c7dda0e13697b92f40059763a7158d037be7bed5429232c',
+  'macos-x86_64': '15464d99adc3bb4de1308260d79878336b04a1ac1aeff83e10f192de7d235946',
+  'linux-x86_64': '7039cb16060ab22e669852e55774d894b55f25ea8bd0ab7194d3478429a58725',
+  'linux-aarch64': '67040520d44c87ccaaf5aa7df0dc1ff122eb938dbb600ae7722e8b6b75282a4b',
+  'windows-x86_64': '9eed3c3ff1fe43df034ce360196c9ec95472560d77ff55614d0cd5120edea27b',
   'android-aarch64': 'bf8f4c63652fd7daa62288713c7fa512f244a5b972808f6251450e5fdfca9120',
   'android-armv7': '13befa352b64c32ba460b63066179bb1c9eaf6c3ea7057ae860dcdd22b8acf7b',
   'android-x86_64': 'ab3152ba164bcd49e50175086c62e40ffa2bf9002a4f6473f77111bd88b0462b',
@@ -43,6 +55,6 @@ const DESKTOP = {
 const ANDROID = { 'arm64-v8a': 'android-aarch64', 'armeabi-v7a': 'android-armv7', 'x86_64': 'android-x86_64' };
 const COMMON = { [`${PT}/pt_config.json`]: 'pt_config.json', 'docs/tor.txt': 'LICENSE-tor.txt', 'docs/lyrebird.txt': 'LICENSE-lyrebird.txt' };
 
-const fileName = (bundle) => `tor-expert-bundle-${bundle}-${VERSION}.tar.gz`;
+const fileName = (bundle) => `tor-expert-bundle-${bundle}-${versionOf(bundle)}.tar.gz`;
 
-module.exports = { VERSION, SOURCES, SHA256, PT, DESKTOP, ANDROID, COMMON, fileName };
+module.exports = { VERSION, ANDROID_VERSION, versionOf, sourcesFor, SOURCES, SHA256, PT, DESKTOP, ANDROID, COMMON, fileName };

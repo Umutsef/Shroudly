@@ -69,8 +69,82 @@ enum Conns {
         return Array(now).sorted()
     }
 
-    /* What the engine is given (the tunnel sends it). */
+    /* The sites the user sends through Tor (the last way out; the Mac): for
+     * a site that turns the user's country away itself. */
+    static let torKey = "torSites"
+    static func torSites(_ d: UserDefaults = AppGroup.defaults) -> [String] {
+        (d.stringArray(forKey: torKey) ?? []).sorted()
+    }
+
+    @discardableResult
+    static func set(_ host: String, tor on: Bool, _ d: UserDefaults = AppGroup.defaults) -> [String]? {
+        guard let h = clean(host) else { return nil }
+        var now = Set(torSites(d))
+        if on { now.insert(h) } else { now.remove(h) }
+        d.set(Array(now).sorted(), forKey: torKey)
+        return Array(now).sorted()
+    }
+
+    /* "Apps always through Tor" (TorAppsList, from electron/tor-apps.js):
+     * the ids picked, known ones only, in the list's order. */
+    static let torAppsKey = "torApps"
+    static func torApps(_ d: UserDefaults = AppGroup.defaults) -> [String] {
+        let kept = Set(d.stringArray(forKey: torAppsKey) ?? [])
+        return TorAppsList.apps.map(\.id).filter { kept.contains($0) }
+    }
+
+    @discardableResult
+    static func set(app id: String, tor on: Bool, _ d: UserDefaults = AppGroup.defaults) -> [String]? {
+        guard TorAppsList.apps.contains(where: { $0.id == id }) else { return nil }
+        var now = Set(torApps(d))
+        if on { now.insert(id) } else { now.remove(id) }
+        d.set(TorAppsList.apps.map(\.id).filter { now.contains($0) }, forKey: torAppsKey)
+        return torApps(d)
+    }
+
+    /* The names and ranges of the apps `ids`, each once. */
+    static func appEntries(_ ids: [String]) -> [String] {
+        var seen = Set<String>()
+        return TorAppsList.apps.filter { ids.contains($0.id) }.flatMap(\.entries).filter { seen.insert($0).inserted }
+    }
+
+    /* Everything sent through Tor by the user's choice: the sites typed and
+     * the apps picked. */
+    static func torEntries(_ d: UserDefaults = AppGroup.defaults) -> [String] {
+        var seen = Set<String>()
+        return (torSites(d) + appEntries(torApps(d))).filter { seen.insert($0).inserted }
+    }
+
+    /* The listed name that sends this one through Tor (itself or one above). */
+    static func viaTor(_ host: String, _ sites: [String]) -> String? {
+        sites.first { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /* Only the listed sites go through Shroudly's ways (Settings); every
+     * other goes out as it is, with the network's own DNS. */
+    static let onlyModeKey = "onlySitesMode"
+    static let onlyKey = "onlySites"
+    static func onlyMode(_ d: UserDefaults = AppGroup.defaults) -> Bool { d.bool(forKey: onlyModeKey) }
+    static func onlySites(_ d: UserDefaults = AppGroup.defaults) -> [String] {
+        var seen = Set<String>()
+        return (d.string(forKey: onlyKey) ?? "").split(separator: "\n").compactMap { line -> String? in
+            var t = String(line).trimmingCharacters(in: .whitespaces)
+            for p in ["https://", "http://"] where t.lowercased().hasPrefix(p) { t = String(t.dropFirst(p.count)) }
+            if let slash = t.firstIndex(of: "/") { t = String(t[..<slash]) }
+            guard let h = clean(t), h.contains(".") || h.contains(":"), seen.insert(h).inserted else { return nil }
+            return h
+        }
+    }
+    static func setOnly(mode: Bool, text: String, _ d: UserDefaults = AppGroup.defaults) {
+        d.set(mode, forKey: onlyModeKey)
+        d.set(text, forKey: onlyKey)
+    }
+
+    /* What the engine is given (the tunnel sends it, at a start and after
+     * every change: each list cleared first, so sending it again is safe). */
     static func commands(_ d: UserDefaults = AppGroup.defaults) -> [String] {
         ["BLOCK-CLEAR"] + blocked(d).map { "BLOCK \($0)" }
+            + ["TOR-CLEAR"] + torEntries(d).map { "TOR \($0)" }
+            + ["ONLY-CLEAR"] + onlySites(d).map { "ONLY \($0)" } + ["ONLY-MODE \(onlyMode(d) ? 1 : 0)"]
     }
 }

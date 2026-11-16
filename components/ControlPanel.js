@@ -2,17 +2,32 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { HeartIcon, PowerIcon, ShieldAlertIcon, ShieldCheckIcon, ShieldIcon, SpinnerIcon } from './icons';
+import { exitWithPlace } from './exitPlace';
+import { BugIcon, HeartIcon, PowerIcon, SpinnerIcon } from './icons';
+import ReportDialog from './ReportDialog';
 import Toast from './Toast';
 import ClampedText from './ClampedText';
 import { proxyNotice, PROXY_ACTIONS } from './proxyNotice';
 import { pickRoom } from './panelRoom';
 import { OWN_SERVER_WHY } from './ownServerText';
+import { logoSrc, useLogo } from './Appearance';
 
 export default function ControlPanel({ dpiStatus, onStatusChange, onSupport }) {
+  const logo = useLogo();
   const { t, language, isRTL } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  // "Something not working?" (ReportDialog) open.
+  const [reportOpen, setReportOpen] = useState(false);
+  // "Something not working?" only after Shroudly itself went wrong, for a
+  // day (electron/report-check.js offered).
+  const [reportOn, setReportOn] = useState(false);
+  useEffect(() => {
+    const e = typeof window !== 'undefined' ? window.electron : null;
+    if (!e || !e.reportOffered) return undefined;
+    e.reportOffered().then((on) => setReportOn(!!on)).catch(() => {});
+    return e.onReportOffered ? e.onReportOffered((on) => setReportOn(!!on)) : undefined;
+  }, []);
   const [fixing, setFixing] = useState(false);
   const [room, setRoom] = useState('full');
   const panelRef = useRef(null);
@@ -140,15 +155,10 @@ export default function ControlPanel({ dpiStatus, onStatusChange, onSupport }) {
   // On but not working (browsers not going through it, or the user's own
   // server not answering): the shield in amber with its alert, as the title.
   const warned = notRouting || !!ownServerDown;
-  const ShieldGlyph = warned ? ShieldAlertIcon : active ? ShieldCheckIcon : ShieldIcon;
   const label = loading ? (active ? t('stopping') : t('starting')) : starting ? t('starting') : (active ? t('stop') : t('start'));
-  // The shield and the title: the accent colour when it works, amber when it
-  // is on and does not yet.
-  // --state: the accent, except where the accent is a warning or danger
-  // colour (globals.css).
-  const ring = warned ? 'var(--warn-line)' : active ? 'var(--state-line)' : 'var(--line-strong)';
-  const disc = warned ? 'var(--warn-soft)' : active ? 'var(--state-soft)' : 'var(--surface)';
-  const glyph = warned ? 'var(--warn)' : active ? 'var(--state)' : 'var(--text-faint)';
+  // The orb's light and the title: the accent colour when it works, amber
+  // when it is on and does not yet. --state: the accent, except where the
+  // accent is a warning or danger colour (globals.css).
 
   return (
     <>
@@ -157,24 +167,21 @@ export default function ControlPanel({ dpiStatus, onStatusChange, onSupport }) {
       {/* data-room: the shield gives up its room first in a short window
           (panelRoom.js, globals.css). */}
       <div ref={panelRef} data-room={room} className="power-panel flex min-h-full flex-col items-center justify-center">
-        {/* The shield — the one bold moment */}
-        <div className="power-shield relative flex shrink-0 items-center justify-center" aria-hidden>
-          {active && !warned && (
-            <span
-              className="power-halo halo absolute rounded-full"
-              style={{ background: 'radial-gradient(circle, var(--state-soft) 0%, transparent 70%)' }}
-            />
-          )}
-          <div
-            className="power-disc relative flex items-center justify-center rounded-full border transition-all duration-500"
-            style={{ borderColor: ring, background: disc }}
-          >
-            <ShieldGlyph
-              className="power-glyph transition-colors duration-500"
-              strokeWidth={1.5}
-              style={{ color: glyph }}
-            />
+        {/* The orb — the one bold moment: Shroudly's logo on dark glass,
+            its eye shut while off and open once on (the same on the phones
+            and the Mac App Store app). */}
+        <div className="power-shield relative flex shrink-0 items-center justify-center" aria-hidden
+             data-look={warned ? 'warn' : active ? 'on' : (loading || starting) ? 'busy' : 'off'}>
+          <span className="power-glow absolute rounded-full" />
+          <div className="power-disc relative flex items-center justify-center rounded-full">
+            {/* Another logo chosen (Settings, Appearance): that one, dimmed
+                while off, as everywhere else the app shows its icon. */}
+            {logo === 'classic' ? <>
+              <img src="./mark-closed.png" alt="" draggable={false} className="power-mark power-mark-closed absolute select-none" />
+              <img src="./mark-open.png" alt="" draggable={false} className="power-mark power-mark-open absolute select-none" />
+            </> : <img src={logoSrc(logo)} alt="" draggable={false} className="power-mark power-logo absolute select-none rounded-[22%]" />}
           </div>
+          {(loading || starting) && <span className="power-turn absolute rounded-full" />}
         </div>
 
         {/* Status text */}
@@ -210,7 +217,7 @@ export default function ControlPanel({ dpiStatus, onStatusChange, onSupport }) {
             <p className="mt-1.5 text-[13px] leading-snug wrap-anywhere" style={{ color: 'var(--warn)' }}>{t('startFailedBody', { repair: t('repairApp') })}</p>
           ) : (
             <p className="mt-1.5 text-[13px] leading-snug" style={{ color: !active && dpiStatus.blocked ? 'var(--warn)' : 'var(--text-dim)' }}>
-              {ownProxy ? t('ownProxyBody') : offline ? t('noInternetBody') : ownServerExit ? t('ownServerExit', { ip: ownServerExit.ip })
+              {ownProxy ? t('ownProxyBody') : offline ? t('noInternetBody') : ownServerExit ? t('ownServerExit', { ip: exitWithPlace(ownServerExit.ip, ownServerExit.loc, language) })
                 : active ? t('dpiBypassRunning') : dpiStatus.blocked ? t('securityStatus') : t('dpiBypassStopped')}
             </p>
           )}
@@ -291,18 +298,34 @@ export default function ControlPanel({ dpiStatus, onStatusChange, onSupport }) {
               <span className="min-w-0 wrap-anywhere">{label}</span>
             </button>
           </div>
-          {support && (
-            <button
+          {/* Quiet links under the main button: telling us what does not
+              work (after Shroudly itself went wrong), and supporting
+              Shroudly (Support.js). */}
+          <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-0.5">
+            {reportOn && <button
               type="button"
-              onClick={onSupport}
-              className="power-support row-hover inline-flex max-w-xs items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium"
+              onClick={() => setReportOpen(true)}
+              data-report-link
+              className="row-hover inline-flex max-w-xs items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium"
               style={{ color: 'var(--text-dim)' }}
             >
-              <HeartIcon className="h-3.5 w-3.5" style={{ color: 'var(--accent)' }} />
-              <span className="min-w-0 wrap-anywhere">{t('supportTitle')}</span>
-            </button>
-          )}
+              <BugIcon className="h-3.5 w-3.5" style={{ color: 'var(--accent)' }} />
+              <span className="min-w-0 wrap-anywhere">{t('reportLink')}</span>
+            </button>}
+            {support && (
+              <button
+                type="button"
+                onClick={onSupport}
+                className="power-support row-hover inline-flex max-w-xs items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium"
+                style={{ color: 'var(--text-dim)' }}
+              >
+                <HeartIcon className="h-3.5 w-3.5" style={{ color: 'var(--accent)' }} />
+                <span className="min-w-0 wrap-anywhere">{t('supportTitle')}</span>
+              </button>
+            )}
+          </div>
         </div>
+        {reportOpen && <ReportDialog onClose={() => setReportOpen(false)} />}
       </div>
     </>
   );

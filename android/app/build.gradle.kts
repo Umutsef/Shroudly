@@ -154,7 +154,15 @@ dependencies {
     // source): the bundle for Play only. Not app-update-ktx, which brings
     // coroutines and newer AndroidX for nothing this app uses.
     if (playBuild) implementation("com.google.android.play:app-update:2.1.0")
+    // Play flagged the androidx.fragment that app-update brings through
+    // play-services-basement as outdated (release 20661, and again on its
+    // vitals page in November 2026): the newest stable one for the bundle,
+    // so a release sent after the store's review is not flagged again.
+    if (playBuild) implementation("androidx.fragment:fragment:1.9.1")
     testImplementation("junit:junit:4.13.2")
+    // org.json for the unit tests (RemoteConfigTest): the JVM's android.jar
+    // carries only stubs of it.
+    testImplementation("org.json:json:20240303")
 }
 
 // The hev tree that is built must be the pinned one, file for file: a tree

@@ -48,6 +48,12 @@ class HelpNudgeTest {
         assertEquals("from before 2.6.48", "2.6.48", WhatsNew.decide(null, "2.6.48", true))
         assertEquals("2.6.48", WhatsNew.decide("2.6.47", "2.6.48", false))
         assertNull(WhatsNew.decide("2.6.48", "2.6.48", true))
+        // Notes that were not rewritten are not shown again under a new number
+        // (2.6.65 to 2.6.70 said 2.6.64's).
+        assertNull("the same notes", WhatsNew.decide("2.6.70", "2.6.71", true, sameNotes = true))
+        assertEquals(WhatsNew.digest(" a\n"), WhatsNew.digest("a"))
+        assertNull("no notes", WhatsNew.digest("  "))
+        assertTrue(WhatsNew.digest("a") != WhatsNew.digest("b"))
         assertEquals("• one\n• two", WhatsNew.lines(" one \n\ntwo\n"))
     }
 
@@ -56,8 +62,20 @@ class HelpNudgeTest {
         assertEquals("203.0.113.7", OwnServer.traceIp("fl=1\nh=cloudflare.com\nip=203.0.113.7\nts=1\n"))
         assertEquals("2001:db8::1", OwnServer.traceIp("ip=2001:db8::1\r\nts=1"))
         assertNull(OwnServer.traceIp("h=x\n"))
+        // Its country (issue #60): the flag and the name in the app's language.
+        assertEquals("IT", OwnServer.traceLoc("ip=1.2.3.4\nloc=IT\ntls=TLSv1.3\n"))
+        assertNull(OwnServer.traceLoc("loc=XX\n"))
+        assertNull(OwnServer.traceLoc("loc=T1\n"))
+        assertEquals("80.174.118.60 · \uD83C\uDDEE\uD83C\uDDF9 Italy", OwnServer.withPlace("80.174.118.60", "IT", java.util.Locale.ENGLISH))
+        assertEquals("1.2.3.4", OwnServer.withPlace("1.2.3.4", null, java.util.Locale.ENGLISH))
         assertNull(OwnServer.traceIp("ip=999.1.1.1\n"))
         assertNull(OwnServer.traceIp("ip=<b>\n"))
         assertNull(OwnServer.traceIp("xip=1.2.3.4\n"))
+    }
+
+    @Test
+    fun notOfferedWhereTorItselfIsBlocked() {
+        for (c in listOf("IR", "ir", "RU", "CN", "BY", "TM", "MM")) assertTrue(c, HelpNudge.torBlocked(c))
+        for (c in listOf("TR", "DE", "PK", null)) assertFalse("$c", HelpNudge.torBlocked(c))
     }
 }

@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.text.Editable
@@ -45,7 +46,11 @@ import android.widget.Toolbar
  * screen is not a wall of text (issue #47).
  */
 class SettingsActivity : Activity() {
+    private var pill: TextView? = null
+
     private companion object {
+        // How long Advanced takes to unfold or fold.
+        const val ADVANCED_ANIM_MS = 220L
         /* The Quick Settings tile was added (or found there) from Settings. */
         const val KEY_TILE_ADDED = "quickTileAdded"
         // The VPN's consent, asked for before protection moves to VPN mode.
@@ -77,17 +82,31 @@ class SettingsActivity : Activity() {
     /* An explanation, when its section shows them. */
     private fun ifOpen(section: Int, text: CharSequence): CharSequence? = if (section in open) text else null
 
+    // A sideways swipe goes to the tab beside it (Chrome.Swipe).
+    private val swipe by lazy { Chrome.Swipe(this, { Chrome.Tab.SETTINGS }) { Chrome.go(this, it) } }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        swipe.feed(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         Accent.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
         Tv.rings(window)
-        findViewById<Toolbar>(R.id.toolbar).apply {
-            navigationIcon?.mutate()?.setTint(getColor(R.color.text))
-            setNavigationOnClickListener { finish() }
-        }
+        // The desktop's frame (Chrome): its top and the six tabs, Settings
+        // chosen; the bar with a way back is not needed then.
+        findViewById<Toolbar>(R.id.toolbar).visibility = View.GONE
+        val frame = findViewById<LinearLayout>(R.id.frame)
+        val (header, p) = Chrome.header(this)
+        pill = p
+        frame.addView(header, 0)
+        frame.addView(Chrome.bottomBar(this, Chrome.Tab.SETTINGS) { Chrome.go(this, it) })
+        groupSettings()
         edgeToEdge()
         showAccents()
+        showLogos()
         showMode()
 
         val group = findViewById<RadioGroup>(R.id.strategy)
@@ -185,9 +204,29 @@ class SettingsActivity : Activity() {
         if (advancedSet()) box.visibility = View.VISIBLE
         showAdvancedTitle()
         row.setOnClickListener {
-            box.visibility = if (box.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            val opening = box.visibility != View.VISIBLE
+            // It opens below the fold, at the end of the page: up to 2.6.59 it
+            // appeared there at once, unseen, and a tap looked like it did
+            // nothing ("is it open or closed?"). Now it unfolds, and the page
+            // moves up to it.
+            (box.parent as? ViewGroup)?.let {
+                android.transition.TransitionManager.beginDelayedTransition(it, android.transition.AutoTransition().setDuration(ADVANCED_ANIM_MS))
+            }
+            box.visibility = if (opening) View.VISIBLE else View.GONE
             showAdvancedTitle()
+            if (opening) row.postDelayed({ scrollToAdvanced(row) }, ADVANCED_ANIM_MS / 2)
         }
+    }
+
+    /* The Advanced row at the top of the page, what it holds below it. */
+    private fun scrollToAdvanced(row: View) {
+        var p = row.parent
+        while (p != null && p !is ScrollView) p = p.parent
+        val scroll = p as? ScrollView ?: return
+        val r = android.graphics.Rect()
+        row.getDrawingRect(r)
+        scroll.offsetDescendantRectToMyCoords(row, r)
+        scroll.smoothScrollTo(0, (r.top - (12 * resources.displayMetrics.density).toInt()).coerceAtLeast(0))
     }
 
     private fun showAdvancedTitle() {
@@ -224,8 +263,18 @@ class SettingsActivity : Activity() {
             isChecked = OnlineCount.enabled(this@SettingsActivity)
             setOnCheckedChangeListener { _, on -> OnlineCount.setEnabled(this@SettingsActivity, on) }
         }
+        // The lite APK has no Tor, and nothing of Tor's is offered there
+        // either: helping others is a Snowflake proxy for the Tor network
+        // (issue #75). Its divider and the Tor toggle's go with them.
+        val lite = BuildConfig.APK_VARIANT == "lite"
+        for (id in intArrayOf(R.id.snowflakeDivider, R.id.torDivider)) findViewById<View>(id).visibility = if (lite) View.GONE else View.VISIBLE
+        // Where Tor itself is blocked the user is among those who need the
+        // help: the Snowflake switch is not shown (HelpNudge.torBlockedHere).
+        val helpHidden = !Snowflake.offered() || HelpNudge.torBlockedHere(this)
+        findViewById<View>(R.id.snowflakeDivider).visibility = if (helpHidden) View.GONE else View.VISIBLE
         // Inside Shroudly while on, charging, on Wi-Fi (Snowflake).
         findViewById<Switch>(R.id.snowflake).apply {
+            visibility = if (helpHidden) View.GONE else View.VISIBLE
             isChecked = Snowflake.enabled(this@SettingsActivity)
             setOnCheckedChangeListener { _, on ->
                 Snowflake.setEnabled(this@SettingsActivity, on)
@@ -239,6 +288,7 @@ class SettingsActivity : Activity() {
             isChecked = TorRoute.enabled(this@SettingsActivity)
             setOnCheckedChangeListener { _, on ->
                 TorRoute.setEnabled(this@SettingsActivity, on)
+                if (!on) TorAsk.rest(this@SettingsActivity)
                 tell("torLastResort")
             }
         }
@@ -378,12 +428,91 @@ class SettingsActivity : Activity() {
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
-                    if (o.id == Accent.id(this@SettingsActivity)) return@setOnClickListener
+                    if (o.id == Accent.id(this@SettingsActivity) && !Accent.followsLogo(this@SettingsActivity)) return@setOnClickListener
+                    // A colour picked by hand: the icon's no longer followed.
+                    Accent.setFollowsLogo(this@SettingsActivity, false)
                     Accent.set(this@SettingsActivity, o.id)
                     recreate()
                 }
             })
         }
+    }
+
+    /* The logo on the home screen (Logos): what it changes, then the three
+     * groups, each a row of pictures that wraps; the chosen one ringed. A
+     * choice is made at once (the launcher shows it after a moment). Not on
+     * a TV: its launchers show the banner, not the icon. */
+    private fun showLogos() {
+        val box = findViewById<LinearLayout>(R.id.logos)
+        if (Tv.isTv(this)) {
+            box.visibility = View.GONE
+            findViewById<View>(R.id.logosTitle).visibility = View.GONE
+            return
+        }
+        box.removeAllViews()
+        val density = resources.displayMetrics.density
+        val gap = (8 * density).toInt()
+        val chosen = Logos.id(this)
+        // As many in a row as fit, never smaller than 44 dp or larger than 56.
+        val usable = resources.displayMetrics.widthPixels - (64 * density).toInt()
+        val perRow = (usable / ((52 * density).toInt() + gap)).coerceIn(4, 9)
+        val size = ((usable - perRow * gap) / perRow).coerceIn((44 * density).toInt(), (56 * density).toInt())
+        box.addView(TextView(this).apply {
+            text = getString(R.string.logoChoiceDesc)
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 12.5f
+            setPadding(0, gap / 2, gap, gap / 2)
+        })
+        for ((group, ids) in Logos.GROUPS) {
+            box.addView(TextView(this).apply {
+                text = getString(when (group) { "styles" -> R.string.logoStyles; "days" -> R.string.logoDays; else -> R.string.logoCountries })
+                setTextColor(getColor(R.color.text_dim))
+                textSize = 11.5f
+                isAllCaps = true
+                setPadding(0, gap, 0, gap / 4)
+            })
+            var row: LinearLayout? = null
+            for ((i, id) in ids.withIndex()) {
+                if (i % perRow == 0) row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }.also { box.addView(it) }
+                row!!.addView(android.widget.ImageView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(size, size).apply { marginEnd = gap; topMargin = gap / 2; bottomMargin = gap / 2 }
+                    setImageResource(Logos.picture(id))
+                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                    val ring = (3 * density).toInt()
+                    setPadding(ring, ring, ring, ring)
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = size * 0.26f
+                        if (id == chosen) setStroke(ring, Accent.color(this@SettingsActivity, R.attr.accent))
+                    }
+                    contentDescription = text(R.string.logoSwatch, "n" to Logos.IDS.indexOf(id) + 1, "total" to Logos.IDS.size)
+                    isSelected = id == chosen
+                    foreground = android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(0x55FFFFFF), null,
+                        android.graphics.drawable.GradientDrawable().apply { cornerRadius = size * 0.26f; setColor(0xFFFFFFFF.toInt()) },
+                    )
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        if (id == Logos.id(this@SettingsActivity)) return@setOnClickListener
+                        Logos.set(this@SettingsActivity, id)
+                        // Its colour too, while the colour follows the icon.
+                        if (Accent.followsLogo(this@SettingsActivity)) recreate() else showLogos()
+                    }
+                })
+            }
+        }
+        // "Colour follows the icon": the app's accent is the logo's.
+        box.addView(Switch(this).apply {
+            text = titled(getString(R.string.logoAccent), getString(R.string.logoAccentDesc))
+            textSize = 15f
+            setTextColor(getColor(R.color.text))
+            isChecked = Accent.followsLogo(this@SettingsActivity)
+            setPadding(0, gap, 0, gap)
+            setOnCheckedChangeListener { _, on ->
+                Accent.setFollowsLogo(this@SettingsActivity, on)
+                recreate()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
     /* VPN or proxy only, each with what it means. A change while protection
@@ -501,7 +630,7 @@ class SettingsActivity : Activity() {
             sbm.requestAddTileService(
                 android.content.ComponentName(this, ShroudlyTileService::class.java),
                 getString(R.string.app_name),
-                android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_shield),
+                android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_stat_logo),
                 mainExecutor,
             ) { result ->
                 if (result == android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED ||
@@ -688,7 +817,7 @@ class SettingsActivity : Activity() {
                 status.text = getString(R.string.testing)
                 Thread {
                     val t0 = System.nanoTime()
-                    val why = OwnServer.test(l!!)
+                    val why = OwnServer.test(l!!)?.let { OwnServer.localIf(it, l.host) }
                     val ms = (System.nanoTime() - t0) / 1_000_000
                     runOnUiThread {
                         if (isFinishing || !dialog.isShowing) return@runOnUiThread
@@ -1073,6 +1202,168 @@ class SettingsActivity : Activity() {
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
+
+    /* The desktop's four tabs of Settings (components/SettingsPanel.js):
+     * General (the language, the apps), Connection (the technique, DNS,
+     * the network: "Advanced"), Server and sharing (your own server,
+     * helping others) and Application (the look, the app's switches). The
+     * sections stay as they are, each in its tab's box; a tab shows its box.
+     * Apple TV keeps one page, for the remote. */
+    private fun groupSettings() {
+        if (Tv.isTv(this)) return
+        val col = findViewById<ScrollView>(R.id.root).getChildAt(0) as LinearLayout
+        val kids = (0 until col.childCount).map { col.getChildAt(it) }
+        if (kids.size < 10) return
+        fun box() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val general = box(); val connection = box(); val sharing = box(); val app = box()
+        val plan = listOf(general, general, app, app, general, general, app, app, connection, connection)
+        col.removeAllViews()
+        // The boxes in the window first, so the views moved into them are
+        // still found (findViewById) below and by the rest of this screen.
+        val boxes = listOf(general, connection, sharing, app)
+        for (b in boxes) col.addView(b)
+        for ((i, v) in kids.withIndex()) (plan.getOrNull(i) ?: app).addView(v)
+        // Your own server: out of "Advanced", its title and card.
+        val ownCard = findViewById<View>(R.id.ownServer)?.parent as? View
+        val adv = findViewById<LinearLayout>(R.id.advancedBox)
+        if (ownCard != null && ownCard.parent === adv) {
+            val at = adv.indexOfChild(ownCard)
+            val title = if (at > 0) adv.getChildAt(at - 1) else null
+            if (title is TextView) { adv.removeView(title); sharing.addView(title) }
+            adv.removeView(ownCard)
+            sharing.addView(ownCard)
+        }
+        // Helping people in censored countries: out of the app's card.
+        val snow = findViewById<View>(R.id.snowflake)
+        (snow?.parent as? LinearLayout)?.let { card ->
+            card.removeView(snow)
+            // Its line stays where it was (the rest of this screen sets it),
+            // with no height: nothing above it there any more.
+            findViewById<View>(R.id.snowflakeDivider)?.let { d -> d.layoutParams = d.layoutParams.apply { height = 0 } }
+            val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = card.background?.constantState?.newDrawable(); setPadding(card.paddingLeft, card.paddingTop, card.paddingRight, card.paddingBottom) }
+            c.addView(snow)
+            sharing.addView(TextView(this, null, 0, R.style.SectionTitle).apply { setText(R.string.snowflake) },
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dpx(24f) })
+            sharing.addView(c, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+        // The last way out and ad blocking: the desktop's Connection tab,
+        // in a card of their own above "Advanced" (their lines kept, the
+        // first one with no height).
+        val tor = findViewById<View>(R.id.torLastResort)
+        (tor?.parent as? LinearLayout)?.let { card ->
+            val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = card.background?.constantState?.newDrawable(); setPadding(card.paddingLeft, card.paddingTop, card.paddingRight, card.paddingBottom) }
+            for (id in intArrayOf(R.id.torDivider, R.id.torLastResort, R.id.adBlockDivider, R.id.adBlock, R.id.adBlockAllow)) {
+                val v = findViewById<View>(id) ?: continue
+                (v.parent as? LinearLayout)?.removeView(v)
+                c.addView(v)
+            }
+            findViewById<View>(R.id.torDivider)?.let { d -> d.layoutParams = d.layoutParams.apply { height = 0 } }
+            connection.addView(c, 0, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dpx(20f) })
+        }
+        // Which sites Shroudly works on: all (as by default), or only the
+        // listed ones, every other going out as it is (as the desktop's
+        // "Only listed sites"; Conns.setOnly tells the engine at once).
+        // Its explanation behind the title's (i), as every other section's
+        // (issue #47: the long text under it made the page cluttered again).
+        val sitesTitle = TextView(this, null, 0, R.style.SectionTitle_Explained).apply {
+            id = View.generateViewId()
+            setText(R.string.siteListLabel)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isAccessibilityHeading = true
+        }
+        connection.addView(sitesTitle, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        connection.addView(sitesCard(sitesTitle.id), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        val names = listOf(R.string.tabGeneral, R.string.tabConnection, R.string.tabSharing, R.string.tabApp)
+        val accent = Accent.color(this, R.attr.accentLight)
+        val buttons = names.map { n ->
+            TextView(this).apply {
+                setText(n)
+                gravity = android.view.Gravity.CENTER
+                maxLines = 1
+                textSize = 13.5f
+                minHeight = dpx(40f)
+                setPadding(dpx(12f), dpx(6f), dpx(12f), dpx(6f))
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                isClickable = true
+                isFocusable = true
+            }
+        }
+        fun pick(i: Int) {
+            for ((k, b) in boxes.withIndex()) b.visibility = if (k == i) View.VISIBLE else View.GONE
+            for ((k, t) in buttons.withIndex()) {
+                t.setTextColor(if (k == i) accent else getColor(R.color.text_dim))
+                t.background = if (k == i) android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dpx(11f).toFloat()
+                    setColor((accent and 0x00FFFFFF) or 0x1F000000)
+                    setStroke(dpx(1f), (accent and 0x00FFFFFF) or 0x61000000)
+                } else null
+            }
+            getSharedPreferences("ui", MODE_PRIVATE).edit().putInt("settingsTab", i).apply()
+        }
+        for ((i, b) in buttons.withIndex()) b.setOnClickListener { pick(i) }
+        // One line while the four names fit whole, else two by two (FitTabs).
+        val bar = FitTabs(this, buttons).apply {
+            background = getDrawable(R.drawable.card)
+            setPadding(dpx(4f), dpx(4f), dpx(4f), dpx(4f))
+        }
+        col.addView(bar, 0, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dpx(14f) })
+        pick(getSharedPreferences("ui", MODE_PRIVATE).getInt("settingsTab", 0).coerceIn(0, 3))
+    }
+
+    /* "Only listed sites": a switch, what it means, and the list (one site
+     * per line, a site covering every name under it), kept as it is typed. */
+    private fun sitesCard(section: Int): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = getDrawable(R.drawable.card)
+            setPadding(dpx(14f), dpx(6f), dpx(12f), dpx(12f))
+        }
+        val desc = TextView(this).apply {
+            textSize = 13f
+            setTextColor(getColor(R.color.text_dim))
+            textAlignment = View.TEXT_ALIGNMENT_VIEW_START
+        }
+        val box = EditText(this).apply {
+            setText(Conns.onlySites(this@SettingsActivity).joinToString("\n"))
+            setHint(R.string.siteListHint)
+            textDirection = View.TEXT_DIRECTION_LTR
+            textSize = 14f
+            minLines = 3
+            maxLines = 10
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setTextColor(getColor(R.color.text))
+            setHintTextColor(getColor(R.color.text_faint))
+        }
+        val sw = Switch(this).apply {
+            setText(R.string.routeListed)
+            textSize = 15f
+            setTextColor(getColor(R.color.text))
+            minHeight = dpx(52f)
+            isChecked = Conns.onlyMode(this@SettingsActivity)
+        }
+        fun show() {
+            val text = ifOpen(section, getString(if (sw.isChecked) R.string.routeListedDesc else R.string.routeAllDesc))
+            desc.text = text
+            desc.visibility = if (text == null) View.GONE else View.VISIBLE
+            box.visibility = if (sw.isChecked) View.VISIBLE else View.GONE
+        }
+        redraw[section] = { show() }
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val save = Runnable { Conns.setOnly(this, sw.isChecked, box.text.toString().split('\n')) }
+        sw.setOnCheckedChangeListener { _, _ -> show(); main.removeCallbacks(save); save.run() }
+        box.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) { main.removeCallbacks(save); main.postDelayed(save, 800) }
+        })
+        show()
+        card.addView(sw)
+        card.addView(desc)
+        card.addView(box, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dpx(8f) })
+        return card
+    }
+
+    private fun dpx(v: Float): Int = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt()
 
     private fun edgeToEdge() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return

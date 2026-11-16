@@ -1,0 +1,384 @@
+import Foundation
+import CryptoKit
+
+/*
+ * "Something not working?" (ReportView): what the user wrote, a few facts
+ * about the device and the log (Diagnostics.text), sent to codeshare.me
+ * (POST /api/shroudly/report, on Codeshare's own server), which mails it to
+ * the developer and keeps nothing. Only when the user taps Send, after
+ * reading what goes and agreeing to send it with the log. The same as the
+ * desktop's (electron/report.js) and Android's (Report.kt): the same body,
+ * limits, proof of work and reference numbers.
+ *
+ * On the device: the references sent, with when, for 60 days, so the user
+ * can quote one; and so no more than one goes an hour and three a day (the
+ * server holds its own limits too). Nothing else is kept.
+ *
+ * The request is the app's own: while protection is on it goes through the
+ * tunnel like every app's.
+ */
+enum Report {
+    static let url = URL(string: "https://codeshare.me/api/shroudly/report")!
+    static let host = "codeshare.me"
+    static let hour: TimeInterval = 3600
+    static let day: TimeInterval = 24 * 3600
+    static let historySpan: TimeInterval = 60 * 24 * 3600
+    static let perHour = 1
+    static let perDay = 3
+    static let whatMin = 80
+    static let whatWords = 8
+    static let whatMax = 1000
+    static let powBits = 18
+    static let logMaxChars = 2 * 1024 * 1024
+    private static let powPrefix = "shroudly-report-v1"
+    private static let key = "shroudlyReports"
+
+    struct Sent: Codable, Equatable {
+        let ref: String
+        let at: Date
+    }
+
+    struct Wait: Equatable {
+        let seconds: TimeInterval
+        let limit: String?
+    }
+
+    struct Fields {
+        var what = ""
+        var site = ""
+        var isp = ""
+        var country = ""
+        var contact = ""
+    }
+
+    enum Outcome: Equatable {
+        case sent(String)
+        case failed(String, limit: String?)
+    }
+
+    static func isRef(_ s: String) -> Bool {
+        s.range(of: "^SR-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$", options: .regularExpression) != nil
+    }
+
+    /* Characters as the server counts them (code points). */
+    /* Every setting as it acts, defaults included, and which were changed
+     * from them (as the desktop's and Android's reports): whether a server
+     * or a DNS of one's own is set, never which. */
+    static func settings(_ s: AppSettings, adBlock: Bool, countMeIn: Bool, helpOthers: Bool) -> (line: String, changed: [String]) {
+        let d = AppSettings()
+        var changed: [String] = []
+        func mark(_ k: String, _ diff: Bool) { if diff { changed.append(k) } }
+        mark("technique", s.strategyId != d.strategyId)
+        mark("quicOff", s.quicOff != d.quicOff)
+        mark("ipv6Off", s.ipv6Off != d.ipv6Off)
+        mark("keepOn", s.keepOn != d.keepOn)
+        mark("ownServer", !s.ownServer.isEmpty)
+        mark("dns", s.dnsKind != d.dnsKind || !s.dnsServer.isEmpty)
+        mark("dnsOnly", s.dnsStrict != d.dnsStrict)
+        mark("torLastResort", s.torLastResort != d.torLastResort)
+        mark("adBlock", adBlock)
+        mark("countMeIn", !countMeIn)
+        mark("helpOthers", helpOthers)
+        let line = "technique \(s.strategy.id), QUIC off \(s.quicOff), IPv6 off \(s.ipv6Off), keep on \(s.keepOn), "
+            + "DNS \(s.dnsKind)\(s.dnsServer.isEmpty ? "" : " (own server set)")\(s.dnsStrict ? " (only this server)" : ""), "
+            + "own server \(s.ownServer.isEmpty ? "not set" : "set"), Tor last resort \(s.torLastResort), "
+            + "block ads \(adBlock), count me in \(countMeIn), help others \(helpOthers)"
+        return (line, changed)
+    }
+
+    /* The apps whose names a report keeps however they went: the engine's
+     * own families (core/src/engine.c SITE_FAMILY), the same list on every
+     * platform (electron/report.js, Report.kt). */
+    static let appDomains = [
+        "discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media", "discordcdn.com", "discord.co", "youtube.com",
+        "youtu.be", "ytimg.com", "googlevideo.com", "ggpht.com", "youtube-nocookie.com", "x.com", "twitter.com", "twimg.com",
+        "t.co", "instagram.com", "cdninstagram.com", "facebook.com", "fbcdn.net", "fb.com", "fbsbx.com", "messenger.com",
+        "whatsapp.com", "whatsapp.net", "telegram.org", "t.me", "telegram.me", "telesco.pe", "tdesktop.com", "telegra.ph",
+        "roblox.com", "rbxcdn.com", "rbx.com", "rbxinfra.net", "riotgames.com", "leagueoflegends.com", "pvp.net", "riotcdn.net",
+        "playvalorant.com", "lolstatic.com", "rgpub.io", "twitch.tv", "ttvnw.net", "jtvnw.net", "spotify.com", "scdn.co",
+        "spotifycdn.com", "reddit.com", "redd.it", "redditmedia.com", "redditstatic.com", "tiktok.com", "tiktokcdn.com", "tiktokv.com",
+        "signal.org", "whispersystems.org",
+    ]
+    static func isApp(_ host: String) -> Bool {
+        var h = host.lowercased()
+        if h.hasSuffix(".") { h.removeLast() }
+        return appDomains.contains { h == $0 || h.hasSuffix("." + $0) }
+    }
+
+    /* The Connections list as lines of the report, as the desktop's and
+     * Android's: the names Shroudly did something to, and the apps' names
+     * however they went; other untouched names (the browsing) left out. */
+    /* What a row says beyond its count (electron/report.js connDetail): how
+     * many are open now and what went each way; a connection that got
+     * nothing back ("down 0 B") is what a report most often needs to see. */
+    static func bytes(_ n: Int64) -> String {
+        if n >= 1_048_576 { return String(format: "%.1f MB", Double(n) / 1_048_576) }
+        if n >= 1024 { return "\(Int((Double(n) / 1024).rounded())) KB" }
+        return "\(n) B"
+    }
+
+    static func connDetail(_ r: ConnRow) -> String {
+        var parts: [String] = []
+        if r.active > 0 { parts.append("\(r.active) open") }
+        parts.append("up \(bytes(r.up)), down \(bytes(r.down))")
+        return "  " + parts.joined(separator: ", ")
+    }
+
+    static func connsText(_ rows: [ConnRow], max: Int = 60) -> String {
+        let order = ["tor": 0, "server": 1, "technique": 2, "direct": 3]
+        let list = rows.filter { !$0.host.isEmpty && ($0.route != "direct" || isApp($0.host)) }.sorted {
+            let a = order[$0.route] ?? 3, b = order[$1.route] ?? 3
+            if a != b { return a < b }
+            if $0.conns != $1.conns { return $0.conns > $1.conns }
+            return $0.host < $1.host
+        }
+        if list.isEmpty { return "(none)" }
+        var lines = list.prefix(max).map { r -> String in
+            let extra = [r.blocked ? "blocked by the user" : nil, r.refused > 0 ? "\(r.refused) refused" : nil].compactMap { $0 }.joined(separator: ", ")
+            return "\(String(r.host.prefix(120)))  \(r.route)  \(r.conns) conns\(connDetail(r))\(extra.isEmpty ? "" : "  (\(extra))")"
+        }
+        if list.count > max { lines.append("(+\(list.count - max) more)") }
+        return lines.joined(separator: "\n")
+    }
+
+    static func chars(_ s: String) -> Int {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count
+    }
+
+    /* ── what a report must carry ──────────────────────────────────────
+     * What happened in real words, the site or app, and an e-mail address
+     * that can take an answer: as electron/report-check.js, Report.kt and
+     * the report server, which also checks that the address's domain takes
+     * mail. Only e-mail is taken, never a Telegram name. */
+    static let disposable: Set<String> = [
+        "mailinator.com", "guerrillamail.com", "guerrillamail.net", "guerrillamailblock.com", "sharklasers.com", "grr.la",
+        "yopmail.com", "yopmail.net", "yopmail.fr", "10minutemail.com", "10minutemail.net", "tempmail.com", "temp-mail.org",
+        "temp-mail.io", "tempmailo.com", "tempail.com", "tmpmail.org", "tmpmail.net", "trashmail.com", "trashmail.de",
+        "getnada.com", "nada.email", "dispostable.com", "maildrop.cc", "throwawaymail.com", "fakeinbox.com", "mintemail.com",
+        "emailondeck.com", "mohmal.com", "mailnesia.com", "mytemp.email", "tempinbox.com", "spamgourmet.com", "mailcatch.com",
+        "moakt.com", "emailfake.com", "fakemail.net", "burnermail.io", "dropmail.me", "tempr.email", "discard.email",
+        "mail.tm", "mail.gw", "1secmail.com", "1secmail.org", "1secmail.net", "inboxkitten.com", "mailpoof.com", "linshiyouxiang.net",
+    ]
+    static let fakeDomains: Set<String> = ["example.com", "example.org", "example.net", "test.com", "test.org", "domain.com", "email.test",
+        "localhost", "abc.com", "xyz.com", "asd.com", "aaa.com", "qwe.com", "asdf.com", "mail.com.com", "gmail.co", "gmial.com", "gamil.com"]
+
+    private static func matches(_ s: String, _ pattern: String, caseless: Bool = false) -> [String]? {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: caseless ? [.caseInsensitive] : []),
+              let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) else { return nil }
+        return (0..<m.numberOfRanges).map { i in Range(m.range(at: i), in: s).map { String(s[$0]) } ?? "" }
+    }
+
+    static func contactOk(_ v: String) -> Bool {
+        let s = v.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard s.count <= 200,
+              let m = matches(s, "^([^\\s@]{1,64})@((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,24})$") else { return false }
+        let local = m[1], domain = m[2].lowercased()
+        if matches(local, "^(test|testing|tester|example|admin|user|email|mail|fake|spam|none|no|null|nobody|asd+f*|qwe+r*t*y*|zxc+|abc+d*|x+|a+|1+2*3*4*5*6*)$", caseless: true) != nil { return false }
+        if let f = local.first, local.allSatisfy({ $0 == f }) { return false }
+        if disposable.contains(domain) || fakeDomains.contains(domain) { return false }
+        return matches(local, "^[b-df-hj-np-tv-xz]{6,}$", caseless: true) == nil
+    }
+
+    static func whatOk(_ v: String) -> Bool {
+        let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+        let scalars = Array(t.unicodeScalars)
+        guard scalars.count >= whatMin, scalars.count <= whatMax else { return false }
+        let words = t.split(whereSeparator: { $0.isWhitespace }).map(String.init).filter { $0.contains { $0.isLetter } }
+        guard words.count >= whatWords, Set(words.map { $0.lowercased() }).count >= 5 else { return false }
+        let letters = scalars.filter { CharacterSet.letters.contains($0) }
+        guard Double(letters.count) >= Double(scalars.count) * 0.5 else { return false }
+        var run = 1
+        for i in 1..<scalars.count { run = scalars[i] == scalars[i - 1] ? run + 1 : 1; if run >= 6 { return false } }
+        var count: [String: Int] = [:]
+        for c in letters { count[String(c).lowercased(), default: 0] += 1 }
+        if Double(count.values.max() ?? 0) > Double(letters.count) * 0.3 { return false }
+        let latin = words.filter { $0.count >= 6 && $0.allSatisfy { ($0 >= "a" && $0 <= "z") || ($0 >= "A" && $0 <= "Z") } }
+        if !latin.isEmpty, Double(latin.filter { !$0.lowercased().contains(where: { "aeiouy".contains($0) }) }.count) > Double(latin.count) * 0.4 { return false }
+        return true
+    }
+
+    /* What names no site or app ("vpn", "internet", "everything"): the
+     * same list as electron/report-check.js SITE_EMPTY. */
+    static let siteEmpty: Set<String> = ["vpn", "proxy", "internet", "net", "wifi", "wi-fi", "all", "everything", "any", "anything", "app", "apps", "application", "site", "sites", "website", "websites", "web", "none", "no", "nothing", "test", "shroudly", "all sites", "all apps", "every site", "every app", "همه", "همه چیز", "همه سایت ها", "همه سایتها", "اینترنت", "فیلترشکن", "وی پی ان", "все", "всё", "все сайты", "интернет", "впн", "hepsi", "her şey", "herşey", "tümü", "tüm siteler", "uygulama", "site", "الكل", "كل شيء", "الانترنت", "كل المواقع", "انترنت", "全部", "所有", "互联网"]
+
+    static func siteOk(_ v: String) -> Bool {
+        let cut = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".,;:!?'\"()[]{}<>/\\|_*-"))
+        let t = v.lowercased().components(separatedBy: cut).filter { !$0.isEmpty }.joined(separator: " ")
+        if t.unicodeScalars.filter({ CharacterSet.alphanumerics.contains($0) }).count < 2 { return false }
+        return !siteEmpty.contains(t)
+    }
+
+    /* The log shows the engine was started: a report about something never
+     * tried with protection on says nothing (electron/report-check.js). */
+    static func triedOk(_ log: String) -> Bool { log.contains("Starting engine") }
+
+    /* The first thing to put right, or nil: "what", "site" or "contact". */
+    static func problem(what: String, site: String, contact: String) -> String? {
+        if !whatOk(what) { return "what" }
+        if !siteOk(site) { return "site" }
+        if !contactOk(contact) { return "contact" }
+        return nil
+    }
+
+    static func history(_ list: [Sent], now: Date = Date()) -> [Sent] {
+        Array(list.filter { isRef($0.ref) && $0.at <= now.addingTimeInterval(60) && now.timeIntervalSince($0.at) < historySpan }
+            .sorted { $0.at > $1.at }.prefix(50))
+    }
+
+    static func wait(_ list: [Sent], now: Date = Date()) -> Wait {
+        let h = history(list, now: now)
+        let dayList = h.filter { now.timeIntervalSince($0.at) < day }
+        let hourList = h.filter { now.timeIntervalSince($0.at) < hour }
+        if dayList.count >= perDay { return Wait(seconds: dayList[perDay - 1].at.addingTimeInterval(day).timeIntervalSince(now), limit: "day") }
+        if hourList.count >= perHour { return Wait(seconds: hourList[perHour - 1].at.addingTimeInterval(hour).timeIntervalSince(now), limit: "hour") }
+        return Wait(seconds: 0, limit: nil)
+    }
+
+    static func load(_ defaults: UserDefaults = .standard) -> [Sent] {
+        let list = (defaults.data(forKey: key)).flatMap { try? JSONDecoder().decode([Sent].self, from: $0) } ?? []
+        let h = history(list)
+        if h != list, let d = try? JSONEncoder().encode(h) { defaults.set(d, forKey: key) }
+        return h
+    }
+
+    static func record(_ ref: String, _ defaults: UserDefaults = .standard) {
+        let h = history([Sent(ref: ref, at: Date())] + load(defaults))
+        if let d = try? JSONEncoder().encode(h) { defaults.set(d, forKey: key) }
+    }
+
+    // ── where "Something not working?" is offered ─────────────────────────
+    /* Only once Shroudly itself went wrong (protection could not start, or
+     * ended with an error without Stop), for a day, and gone again as soon
+     * as a report is sent; everywhere (the owner, 2026-11-16). The same rule
+     * as Android (Report.kt) and the desktop (electron/report-check.js). */
+    static let faultShows: TimeInterval = 24 * 3600
+    static let faultKey = "reportFaultAt"
+
+    static func offered(faultAt: TimeInterval, lastSentAt: TimeInterval, now: TimeInterval) -> Bool {
+        faultAt > lastSentAt && now - faultAt >= 0 && now - faultAt < faultShows
+    }
+
+    static func offered(faultAt: TimeInterval, _ defaults: UserDefaults = .standard, now: Date = Date()) -> Bool {
+        // The remote settings may show it always, or never (RemoteConfig).
+        switch RemoteConfig.reportOffer(RemoteConfig.settings()) {
+        case "always": return true
+        case "never": return false
+        default: break
+        }
+        let last = load(defaults).map { $0.at.timeIntervalSince1970 }.max() ?? 0
+        return offered(faultAt: faultAt, lastSentAt: last, now: now.timeIntervalSince1970)
+    }
+
+    /* Shroudly's own going wrong, now. */
+    static func fault(_ defaults: UserDefaults = .standard) {
+        defaults.set(Date().timeIntervalSince1970, forKey: faultKey)
+    }
+
+    private static func cut(_ s: String, _ max: Int) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        var u = String.UnicodeScalarView()
+        u.append(contentsOf: t.unicodeScalars.prefix(max))
+        return String(u)
+    }
+
+    // ── gzip (the server unpacks gzip; Foundation makes raw deflate) ───────
+
+    private static let crcTable: [UInt32] = (0..<256).map { i -> UInt32 in
+        var c = UInt32(i)
+        for _ in 0..<8 { c = (c & 1) != 0 ? 0xEDB8_8320 ^ (c >> 1) : c >> 1 }
+        return c
+    }
+
+    static func crc32(_ data: Data) -> UInt32 {
+        var c: UInt32 = 0xFFFF_FFFF
+        for b in data { c = crcTable[Int((c ^ UInt32(b)) & 0xFF)] ^ (c >> 8) }
+        return c ^ 0xFFFF_FFFF
+    }
+
+    static func gzip(_ data: Data) -> Data? {
+        guard let deflated = try? (data as NSData).compressed(using: .zlib) as Data else { return nil }
+        var out = Data([0x1F, 0x8B, 0x08, 0x00, 0, 0, 0, 0, 0x00, 0xFF])
+        out.append(deflated)
+        var crc = crc32(data).littleEndian
+        var size = UInt32(truncatingIfNeeded: data.count).littleEndian
+        withUnsafeBytes(of: &crc) { out.append(contentsOf: $0) }
+        withUnsafeBytes(of: &size) { out.append(contentsOf: $0) }
+        return out
+    }
+
+    // ── the request ─────────────────────────────────────────────────────────
+
+    /* The body, as JSON text; a long log keeps its end. */
+    static func body(_ f: Fields, version: String, platform: String, os: String, device: String, lang: String, log: String) -> String? {
+        let l = log.count > logMaxChars ? "[… the start was cut]\n" + String(log.suffix(logMaxChars)) : log
+        guard let gz = gzip(Data(l.utf8)) else { return nil }
+        let o: [String: Any] = [
+            "v": 1,
+            "app": ["platform": platform, "version": version, "os": cut(os, 100), "device": cut(device, 100)],
+            "lang": cut(lang, 20),
+            "what": cut(f.what, whatMax),
+            "site": cut(f.site, 300),
+            "isp": cut(f.isp, 120),
+            "country": cut(f.country, 80),
+            "contact": cut(f.contact, 200),
+            "log": gz.base64EncodedString(),
+        ]
+        guard let d = try? JSONSerialization.data(withJSONObject: o) else { return nil }
+        return String(decoding: d, as: UTF8.self)
+    }
+
+    private static func hex(_ d: some Sequence<UInt8>) -> String { d.map { String(format: "%02x", $0) }.joined() }
+
+    private static func zeroBits(_ d: some Sequence<UInt8>) -> Int {
+        var n = 0
+        for b in d {
+            if b == 0 { n += 8; continue }
+            return n + b.leadingZeroBitCount
+        }
+        return n
+    }
+
+    /* The proof of work the server asks of every report (codeshare.me,
+     * server/shroudly/report.ts powOk): "<unix seconds>.<nonce>" such that
+     * SHA-256 of "shroudly-report-v1\n<seconds>\n<SHA-256 of the body, hex>\n
+     * <nonce>" starts with powBits zero bits. A fraction of a second. */
+    static func proofOfWork(_ body: String, bits: Int = powBits, now: Date = Date()) -> String {
+        let at = Int(now.timeIntervalSince1970)
+        let bh = hex(SHA256.hash(data: Data(body.utf8)))
+        let head = Data("\(powPrefix)\n\(at)\n\(bh)\n".utf8)
+        var n: UInt64 = 0
+        while true {
+            let nonce = String(n, radix: 16)
+            var h = SHA256()
+            h.update(data: head)
+            h.update(data: Data(nonce.utf8))
+            if zeroBits(h.finalize()) >= bits { return "\(at).\(nonce)" }
+            n += 1
+        }
+    }
+
+    static func answer(status: Int, data: Data?) -> Outcome {
+        let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        if status == 200, j?["ok"] as? Bool == true, let ref = j?["ref"] as? String, isRef(ref) { return .sent(ref) }
+        let e = (j?["error"] as? String).flatMap { ["rate", "bad", "off", "mail", "contact", "what", "site"].contains($0) ? $0 : nil } ?? "network"
+        return .failed(e, limit: e == "rate" ? "hour" : nil)
+    }
+
+    /* POST it, with the app's header ("<platform>/<version>") and the proof
+     * of work, worked off the main thread. */
+    static func send(_ body: String, app: String, timeout: TimeInterval = 45) async -> Outcome {
+        let pow = await Task.detached(priority: .userInitiated) { proofOfWork(body) }.value
+        var req = URLRequest(url: url, timeoutInterval: timeout)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue(app, forHTTPHeaderField: "x-shroudly-app")
+        req.setValue(pow, forHTTPHeaderField: "x-shroudly-pow")
+        req.httpBody = Data(body.utf8)
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            return answer(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failed("network", limit: nil)
+        }
+    }
+}

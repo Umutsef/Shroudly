@@ -48,10 +48,11 @@ class Engine(
         // How long a run told to stop may take to return.
         const val STOP_WAIT_MS = 5000L
 
-        /* Addresses the engine refuses at once instead of trying to reach:
-         * the tunnel's own range (TunnelConfig). An app that still holds a
-         * stand-in address from before hev was restarted gets an error right
-         * away, looks the name up again, and gets a fresh one. */
+        /* Addresses the engine never tries to reach: the tunnel's own range
+         * (TunnelConfig). An app that still holds a stand-in address from
+         * before hev was restarted is taken by the name in what it sends
+         * first (its TLS handshake, or an http:// Host), and one that names
+         * nothing is closed (core/src/engine.c, standin_name). */
         const val FAKE_NET_OPTION = "--fake-net"
         const val FAKE_NET = "198.18.0.0/15"
 
@@ -73,6 +74,7 @@ class Engine(
             upstream: File? = null,
             decoyNames: List<String> = emptyList(),
             fallback: File? = null,
+            remote: List<String> = emptyList(),
         ): List<String> {
             // The technique chosen in Settings: automatic (the engine looks for
             // what works per site and keeps it) or one for every site.
@@ -104,6 +106,9 @@ class Engine(
             // a network that lets only allowed sites through keeps open
             // (NationalNet.decoyNames); host names only, at most eight.
             for (n in decoyNames.take(8)) if (Regex("^[A-Za-z0-9.-]{4,253}$").matches(n)) a += listOf("--decoy-name", n)
+            // What the remote settings add, technique tuning only
+            // (RemoteConfig.ENGINE_ALLOWED: never a server, a file or a port).
+            a += remote
             return a
         }
 
@@ -208,6 +213,7 @@ class Engine(
                     val line = raw.trim()
                     if (line.isEmpty()) return@forEachLine
                     val ev2 = EngineEvent.parse(line)
+                    SiteEvents.note(line)
                     when (ev2) {
                         is EngineEvent.Ready -> ready.countDown()
                         is EngineEvent.Error -> lastError = ev2.message

@@ -25,8 +25,18 @@ typedef struct {
    * or HTTP on this computer and its network too, which is never done
    * otherwise (no filter sits there). */
   int      raw_local;
+  /* --local-unacked (tests): this computer acknowledges what is sent to
+   * its own addresses whatever becomes of it, so a filter that swallows a
+   * request cannot be staged there; with this, a request sent to a local
+   * address counts as not acknowledged (see legs_unheard). */
+  int      local_unacked;
   strategy strat;             /* active strategy (used when auto_probe is off,
                                  and as the first candidate when it is on) */
+  /* --http-open: HTTP proxy requests (CONNECT, plain http://) taken
+   * without the password that SOCKS still needs: the Mac App Store app
+   * as the system's proxy, for the apps of this Mac, while its own parts
+   * (hev, encrypted DNS) keep SOCKS with the password. */
+  int      http_open;
   /* SOCKS5 username/password (RFC 1929), from --auth-file. Empty: no
    * authentication, and SOCKS4 is taken as well. Set: every connection must
    * be SOCKS5 and give exactly these. */
@@ -99,6 +109,8 @@ typedef struct {
   _Atomic uint64_t probe_success;
   _Atomic uint64_t probe_fail;
   _Atomic uint64_t fallback;      /* connections the last way out carried */
+  _Atomic uint64_t udp_in;        /* datagrams clients handed the UDP relay,
+                                     sent on or not (Android's tunnel check) */
 } engine_stats;
 
 /* Lifecycle. start() returns 0 on success and runs the accept loop on its own
@@ -114,9 +126,12 @@ int  engine_load_fallback(engine_config *cfg, const char *path);
 /* The names the last way out carried, forgotten: their next connections try
  * every technique again first (FALLBACK-FORGET). */
 void engine_fallback_forget(void);
+/* UNTOR: a name the user took off Tor leaves the last way out's list. */
+void engine_fallback_drop(const char *name);
 void engine_stop(void);
 /* A technique an earlier run learned for host, age milliseconds ago (see engine.c). */
 int  engine_restore(const char *host, const char *technique, uint64_t age);
+int  engine_avoid(const char *host, unsigned mask, uint64_t age);
 int  engine_is_running(void);
 const engine_stats *engine_get_stats(void);
 

@@ -135,7 +135,72 @@ function fakeSpawn(runs) {
 
   t.ok(Object.keys(TorRoute.bridgesOf('{"bridges":{"snowflake":["snowflake 1.2.3.4:1 X","x\\ny"],"evil":["a b"]}}')).join() === 'snowflake', 'only the known transports\' well-formed lines');
 
+  // Protection off for a moment: the same Tor goes on; off for longer: stopped.
+  {
+    const lruns = [];
+    const lg = new TorRoute({ dataDir: data, dir: bin, platform: 'darwin', spawn: fakeSpawn(lruns), ownerPid: 7, stallMs: 60000, idleMs: 60000 });
+    const f1 = await lg.prepare();
+    lg.need();
+    const p1 = lruns[0];
+    p1.say('[notice] Bootstrapped 40% (loading_status)');
+    lg.linger(150);
+    t.ok(!p1.killed && lg.status().state === 'starting', 'protection off: Tor kept for now, still getting through');
+    const f2 = await lg.prepare();
+    await H.sleep(250);
+    t.ok(!p1.killed && lruns.length === 1 && fs.readFileSync(f1, 'utf8') === fs.readFileSync(f2, 'utf8') && lg.status().progress === 40,
+      'protection on again soon: the same Tor on the same port, its progress kept');
+    lg.linger(100);
+    await H.sleep(200);
+    t.ok(p1.killed && lg.status().state === 'off', 'off for longer: Tor stopped');
+    const idle = new TorRoute({ dataDir: data, dir: bin, platform: 'darwin', spawn: fakeSpawn([]), ownerPid: 7 });
+    idle.linger(100000);
+    t.ok(idle.status().state === 'off' && !idle._timers.linger, 'nothing running: nothing kept');
+  }
+
+  // Windows reads Tor's paths in its ANSI code page: a user folder in
+  // another alphabet goes to an ASCII one (short name, else ProgramData).
+  {
+    const A = TorRoute.asciiDir;
+    const ru = 'C:\\Users\\Владимир\\AppData\\Roaming\\shroudly';
+    t.ok(A('C:\\Users\\umut\\AppData\\Roaming\\shroudly', 'win32') === 'C:\\Users\\umut\\AppData\\Roaming\\shroudly' && A('/home/владимир/.config/shroudly', 'linux') === '/home/владимир/.config/shroudly',
+      'an ASCII folder, or any folder off Windows: itself');
+    t.ok(A(ru, 'win32', { short: () => 'C:\\Users\\D0B2~1\\AppData\\Roaming\\shroudly' }) === 'C:\\Users\\D0B2~1\\AppData\\Roaming\\shroudly', 'Windows, a Cyrillic user folder: its short name');
+    const pd = A(ru, 'win32', { short: () => ru, programData: 'C:\\ProgramData' });
+    t.ok(/^C:\\ProgramData\\Shroudly\\tor-[0-9a-f]{12}$/.test(pd) && pd === A(ru, 'win32', { short: () => { throw new Error('no 8.3'); }, programData: 'C:\\ProgramData' }),
+      `no short name: a folder of its own under ProgramData, the same each time (${pd})`);
+    t.ok(A('C:\\Users\\Şükrü\\AppData\\Roaming\\shroudly', 'win32', { short: () => null, programData: 'C:\\ProgramData' }).startsWith('C:\\ProgramData\\Shroudly\\tor-'), 'a Turkish name too');
+  }
+
+  {
+    // The bundle's bridges all blocked (Russia): the ones the Tor Project
+    // gives for this country, through Shroudly's server, after them; once
+    // those got through, the next start goes to them at once.
+    const cruns = []; const clogs = []; let asked = 0;
+    const cr = new TorRoute({
+      dataDir: data, dir: bin, platform: 'darwin', spawn: fakeSpawn(cruns), ownerPid: 9, stallMs: 300, idleMs: 60000, retryMs: 500,
+      log: (l, m) => clogs.push(`${l} ${m}`),
+      countryBridges: async () => { asked++; return { webtunnel: ['webtunnel [2001:db8::1]:443 FFFF url=https://w.example/x ver=0.0.1', 'bad\nline'], obfs4: ['obfs4 198.51.100.7:4444 BBBB cert=y iat-mode=0'] }; },
+    });
+    await cr.prepare();
+    cr.need();
+    await H.sleep(350);                  // Snowflake stalls
+    await H.sleep(350);                  // the bundle's stall
+    await H.sleep(100);
+    const k = cruns[2];
+    t.ok(asked === 1 && k && cr.status().stage === 'country' && /ClientTransportPlugin webtunnel,obfs4,snowflake,meek_lite exec/.test(k.torrc)
+      && k.torrc.indexOf('Bridge webtunnel') < k.torrc.indexOf('Bridge obfs4 198.51.100.7') && k.torrc.indexOf('Bridge obfs4 198.51.100.7') < k.torrc.indexOf('Bridge obfs4 203.0.113.1')
+      && !k.torrc.includes('bad'),
+    `the bundle's bridges blocked: this country's (WebTunnel first), then the bundle's (${cr.status().stage})`);
+    k.say('[notice] Bootstrapped 100% (done): Done');
+    t.ok(cr.status().state === 'ready' && clogs.some((l) => /ready: Tor through this country's bridges/.test(l)), 'ready through them, and said');
+    cr.stop();
+    cr.need();
+    t.ok(cruns[3] && cr.status().stage === 'country' && asked === 1, 'the next start goes to them at once, without asking again');
+    cr.stop();
+  }
+
   fs.rmSync(dir, { recursive: true, force: true });
+
   console.log(`tor-route: ${t.count} passed`);
   process.exit(0);
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

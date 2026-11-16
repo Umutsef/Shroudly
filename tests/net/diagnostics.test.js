@@ -27,6 +27,16 @@ const TAIL_UP = { ...ETH, Tailscale: [{ address: '100.64.0.5', family: 'IPv4', i
   t.ok(r.active.length === 0, 'Tailscale up without an exit node: not a conflict');
   r = await D.runningTools({ details: true, probe: { processes: 'tailscaled', interfaces: TAIL_UP, route: 'Tailscale' } });
   t.ok(r.active.join() === 'Tailscale', 'Tailscale as an exit node (default route): a conflict');
+  // Shroudly's own Tor (the last way out) is not "another bypass tool": named
+  // only when there is one more than Shroudly started, or the Tor Browser.
+  r = await D.runningTools({ details: true, ownTor: 1, probe: { processes: '"tor.exe","5120"\n"lyrebird.exe","5124"', interfaces: ETH, route: 'Ethernet' } });
+  t.ok(!r.active.includes('Tor'), "Shroudly's own tor.exe is not reported as another tool");
+  r = await D.runningTools({ details: true, ownTor: 1, probe: { processes: '"tor.exe","5120"\n"tor.exe","7001"', interfaces: ETH, route: 'Ethernet' } });
+  t.ok(r.active.includes('Tor'), 'a second tor.exe (the Tor Browser, a Tor of the user) still is');
+  r = await D.runningTools({ details: true, ownTor: 0, probe: { processes: '"tor.exe","5120"', interfaces: ETH, route: 'Ethernet' } });
+  t.ok(r.active.includes('Tor'), 'and a tor.exe while Shroudly runs none');
+  r = await D.runningTools({ details: true, ownTor: 1, probe: { processes: '/Applications/Tor Browser.app/Contents/MacOS/firefox\n/Users/x/Library/Application Support/shroudly/tor/tor', interfaces: ETH, route: 'en0' } });
+  t.ok(r.active.includes('Tor'), 'the Tor Browser beside Shroudly\'s own Tor is named');
   r = await D.runningTools({ details: true, probe: { processes: '"goodbyedpi.exe","77"', interfaces: ETH, route: 'Ethernet' } });
   t.ok(r.active.join() === 'GoodbyeDPI', 'a bypass tool counts whenever it runs');
   r = await D.runningTools({ details: true, probe: { processes: '"ByeDPI.exe","9"\nciadpi', interfaces: ETH, route: 'Ethernet' } });
@@ -82,9 +92,25 @@ const TAIL_UP = { ...ETH, Tailscale: [{ address: '100.64.0.5', family: 'IPv4', i
     // window (not only for Discord and Roblox), without a notification, and
     // checked at most once a minute and once per site and network.
     const main = require('fs').readFileSync(require('path').join(ROOT, 'electron', 'main.js'), 'utf8');
-    const fn = main.slice(main.indexOf('async function checkServiceReach'), main.indexOf('async function checkServiceReach') + 3000);
+    const fn = main.slice(main.indexOf('async function checkServiceReach'), main.indexOf('async function checkServiceReach') + 4500);
     t.ok(/ServiceCheck\.isMainName\(host\)/.test(fn) && /lastSiteReach < 60000/.test(fn) && /autoTell\('autoSiteUnreachable', \{ host: site \}\)/.test(fn)
       && /WINDOW_ONLY = \[[^\]]*'autoSiteUnreachable'/.test(main), 'a blocked site of any kind is explained in the window, without a notification, rate-limited');
+  }
+  {
+    // One name of a service blocked by address while its other names work
+    // (Roblox's silver.roblox.com on Turkish networks, with every game
+    // server and API open): not told as the whole service blocked.
+    const main = require('fs').readFileSync(require('path').join(ROOT, 'electron', 'main.js'), 'utf8');
+    const Autopilot = require(require('path').join(ROOT, 'electron', 'autopilot.js'));
+    const src = main.match(/function serviceWorks[\s\S]*?\r?\n}\r?\n/)[0]; // CRLF on Windows checkouts
+    const serviceWorks = new Function('Autopilot', `return (${src.replace('function serviceWorks', 'function')})`)(Autopilot);
+    const dead = { host: 'silver.roblox.com', down: 0, ago: 1000 };
+    t.ok(serviceWorks('roblox', 'silver.roblox.com', [dead, { host: 'c0.rbxcdn.com', down: 900000, ago: 3000 }])
+      && !serviceWorks('roblox', 'silver.roblox.com', [dead, { host: 'apis.roblox.com', down: 2000, ago: 3000 }])
+      && !serviceWorks('roblox', 'silver.roblox.com', [dead, { host: 'apis.roblox.com', down: 900000, ago: 11 * 60 * 1000 }])
+      && !serviceWorks('discord', 'discord.com', [{ host: 'apis.roblox.com', down: 900000, ago: 1 }])
+      && /if \(service && serviceWorks\(family, host, await engine\.connsList\(\)/.test(main),
+    'a service whose other names work through Shroudly is not told as blocked by address');
   }
   r = await D.runningTools({ details: true, probe: { processes: '"ZSATunnel.exe","30"', interfaces: ETH, route: 'Ethernet' } });
   t.ok(r.active.join() === 'Zscaler', 'Zscaler steers traffic whenever it runs');

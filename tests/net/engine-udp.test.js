@@ -246,6 +246,18 @@ const LAN6 = (ifaces.find((i) => (i.family === 'IPv6' || i.family === 6) && !/^f
   c.s.send(Buffer.concat([header(LAN4, 0), Buffer.from('port 0')]), a.port, '127.0.0.1');
   await sleep(500);
   t.ok(e4.got === got, 'a fragment (FRAG != 0) and malformed headers are dropped');
+  // The Connections list shows where datagrams went (QUIC, games, calls), as
+  // "udp" rows with the bytes each way: a slow app over UDP shows in a report.
+  {
+    const before = eng.out.length;
+    eng.proc.stdin.write('CONNS\n');
+    for (let w = 0; w < 3000 && !eng.out.slice(before).includes('conns_end'); w += 50) await sleep(50);
+    const rows = eng.out.slice(before).split('\n').filter((l) => l.includes('"type":"conn"')).map((l) => JSON.parse(l));
+    const ip = rows.find((r) => r.host === LAN4 && r.route === 'udp');
+    t.ok(ip && ip.up > 0 && ip.down > 0 && ip.conns >= 1, `datagrams by address: a "udp" row with bytes up and down (${JSON.stringify(ip)})`);
+    const named = rows.find((r) => r.host === 'udp-echo.example');
+    t.ok(!named || named.route === 'udp', 'by name: listed under the name, as udp');
+  }
   r = await roundTrip(c, a.port, LAN4, e4.port, Buffer.from('still here'));
   t.ok(r && r.data.toString() === 'still here', 'and the association goes on working after them');
 
@@ -536,16 +548,100 @@ const LAN6 = (ifaces.find((i) => (i.family === 'IPv6' || i.family === 6) && !/^f
     const cg = await client();
     r = await roundTrip(cg, g.port, LAN4, e4.port, Buffer.from('still udp'));
     t.ok(r && r.data.toString() === 'still udp', 'with QUIC and IPv6 off, other UDP still goes through');
-    const before = (await eng3.stats()).bytes_up;
+    const s0 = await eng3.stats();
+    const before = s0.bytes_up;
     for (let i = 0; i < 10; i++) cg.s.send(Buffer.concat([header('192.0.2.1', 443), Buffer.alloc(1000, 0xc3)]), g.port, '127.0.0.1');
     await sleep(600);
-    const after = (await eng3.stats()).bytes_up;
+    const s1 = await eng3.stats();
+    const after = s1.bytes_up;
     t.ok(after - before < 1000, `QUIC off: datagrams to port 443 are dropped (${after - before} bytes went out of 10000)`);
+    // Dropped, but counted as received: Android's tunnel check takes them as
+    // the tunnel working (HevWatch), not as packets that vanished.
+    t.ok(s1.udp_in - s0.udp_in === 10, `datagrams the relay got are counted, dropped ones too (${s1.udp_in - s0.udp_in} of 10)`);
+    // A real QUIC Initial is answered on the spot with a Version Negotiation
+    // offering no real version, from the address it was sent to: the app gives
+    // QUIC up at once instead of waiting for its timeout (SR-Y78G), and still
+    // nothing leaves for the network.
+    const dcid = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]); const scid = Buffer.from([9, 10, 11, 12]);
+    const initial = Buffer.concat([Buffer.from([0xc3, 0, 0, 0, 1, dcid.length]), dcid, Buffer.from([scid.length]), scid, Buffer.alloc(1180, 0)]);
+    const b0 = (await eng3.stats()).bytes_up;
+    for (const [host, asName] of [['192.0.2.1', false], ['quic.example', true]]) {
+      const vn = await roundTrip(cg, g.port, host, 443, initial, 1500, asName);
+      const v = vn && vn.data;
+      t.ok(v && (v[0] & 0x80) && v.readUInt32BE(1) === 0 && v[5] === 4 && v.subarray(6, 10).equals(scid) &&
+        v[10] === 8 && v.subarray(11, 19).equals(dcid) && (v.readUInt32BE(19) & 0x0f0f0f0f) === 0x0a0a0a0a,
+        `QUIC off: an Initial to ${host} is answered with a Version Negotiation, so the app moves to TCP at once`);
+      t.ok(vn && vn.host === host && vn.port === 443, `the answer comes as from ${host}:443, where the app sent it`);
+    }
+    t.ok((await eng3.stats()).bytes_up - b0 === 0, 'and nothing of it went out to the network');
+    // What is not QUIC on port 443 (a call's relay, a game) goes as any UDP
+    // does, on an association of its own: dropping every datagram to 443
+    // had cut those too (SR-F040, WhatsApp calls stuck on "connecting").
+    const g2 = await associate(P3);
+    const c2 = await client();
+    const b1 = (await eng3.stats()).bytes_up;
+    for (let i = 0; i < 3; i++) c2.s.send(Buffer.concat([header('192.0.2.1', 443), Buffer.from([0x01, 0x00, 0x00, 0x2c]), Buffer.alloc(96, 7)]), g2.port, '127.0.0.1');
+    await sleep(600);
+    const sent = (await eng3.stats()).bytes_up - b1;
+    t.ok(sent >= 300, `QUIC off: datagrams to 443 that are not QUIC still go out (${sent} bytes of 300)`);
+    g2.ctl.destroy(); c2.close();
     if (e6) {
       r = await roundTrip(cg, g.port, LAN6, e6.port, Buffer.from('six'), 1500);
       t.ok(!r, 'IPv6 off: a datagram to an IPv6 address is dropped');
     }
     g.ctl.destroy(); cg.close(); eng3.stop();
+  }
+
+  // ── with the user's own server (issue #67): nothing on UDP that tells the
+  // provider which sites are visited, or leaves from this device's address
+  // in place of the server's
+  {
+    const os = require('os');
+    const fs = require('fs');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shroudly-up-'));
+    const upFile = path.join(dir, 'up.txt');
+    fs.writeFileSync(upFile, 'socks5://127.0.0.1:9\n', { mode: 0o600 });
+    const P4 = await freePort();
+    const eng4 = await startEngine(P4, ['--auto', '--doh', '--doh-port', String(dns.port), '--upstream-file', upFile]);
+    const g = await associate(P4);
+    const cg = await client();
+    r = await roundTrip(cg, g.port, LAN4, e4.port, Buffer.from('game'));
+    t.ok(r && r.data.toString() === 'game', 'own server: UDP that is not DNS or QUIC still goes (games, calls)');
+    // A STUN binding request to the internet: its answer would give a web
+    // page (WebRTC) this device's own address beside the server's (#58, #59).
+    const stun = Buffer.concat([Buffer.from([0x00, 0x01, 0x00, 0x00, 0x21, 0x12, 0xa4, 0x42]), Buffer.alloc(12, 7)]);
+    let sb = (await eng4.stats()).bytes_up;
+    for (let i = 0; i < 5; i++) cg.s.send(Buffer.concat([header('192.0.2.1', 19302), stun]), g.port, '127.0.0.1');
+    await sleep(600);
+    let sa = (await eng4.stats()).bytes_up;
+    t.ok(sa - sb === 0, `own server: a STUN binding request to the internet is dropped, so WebRTC shows no device address (${sa - sb} bytes)`);
+    r = await roundTrip(cg, g.port, LAN4, e4.port, stun);
+    t.ok(r && r.data.equals(stun), 'own server: STUN on the LAN still goes');
+    let before = (await eng4.stats()).bytes_up;
+    for (let i = 0; i < 10; i++) cg.s.send(Buffer.concat([header('192.0.2.1', 443), Buffer.alloc(1000, 0xc3)]), g.port, '127.0.0.1');
+    await sleep(600);
+    let after = (await eng4.stats()).bytes_up;
+    t.ok(after - before < 1000, `own server: QUIC is dropped, so it goes over TCP through the server (${after - before} of 10000 bytes)`);
+    // The forwarder never answers example.com, and has no route for
+    // example.net: without a server of one's own the query would then go
+    // where the app sent it; with one, never.
+    for (const name of ['example.com', 'example.net']) {
+      const q = dnsQuery(name);
+      before = (await eng4.stats()).bytes_up;
+      cg.s.send(Buffer.concat([header('192.0.2.53', 53), q.buf]), g.port, '127.0.0.1');
+      await sleep(3500);
+      after = (await eng4.stats()).bytes_up;
+      t.ok(after - before === q.buf.length, `own server: ${name} unanswered by encrypted DNS is not sent out in plaintext (${after - before} bytes: the forwarder's copy only)`);
+    }
+    // A public name asked of a LAN resolver (the router asks the provider in
+    // turn) goes to the encrypted forwarder too.
+    const asked = dns.asked['udp-echo.example/A'] || 0;
+    const lq = dnsQuery('udp-echo.example');
+    r = await roundTrip(cg, g.port, '10.255.255.53', 53, lq.buf, 3000);
+    t.ok((dns.asked['udp-echo.example/A'] || 0) === asked + 1 && r && dnsAnswers(r.data, lq.id) === 1,
+      'own server: a public name asked of a LAN resolver is answered by the encrypted forwarder');
+    g.ctl.destroy(); cg.close(); eng4.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 
   const st = await eng.stats();

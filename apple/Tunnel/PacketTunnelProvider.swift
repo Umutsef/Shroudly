@@ -29,7 +29,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /* An engine silent this long (it answers STATS every watchEvery) is hung. */
     static let hungAfter: TimeInterval = 50
     static let maxEngineRestarts = 5
-    static let siteLines = 300
+    static let siteLines = 3000
 
     private struct StartError: LocalizedError {
         let message: String
@@ -43,9 +43,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /* A site needs Tor and the user has not said yes yet (TorNotice.ask):
      * its name, for the app's card; nil when nothing is asked. */
     private var torAsk: String?
+    // The rank of what torAsk names (TorNotice.label).
+    private var torAskRank = -1
     private lazy var torRoute: TorRoute = {
         let t = TorRoute(log: { [weak self] in self?.log($0) })
         t.usedCount = { [weak self] in ((self?.engine?.lastStats?["fallback"]) as? NSNumber)?.int64Value ?? 0 }
+        t.countryBridges = { [weak self] in await TorRoute.fetchCountry(via: self?.enginePath) }
+        // What the user sends through Tor (sites, apps) and opened while it
+        // started: given again, which ends those connections, so the apps
+        // connect again through Tor (a browser keeps one for minutes).
+        t.onReady = { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                let t = Conns.torEntries()
+                if !t.isEmpty, !self.stopping, let e = self.engine { e.send(t.map { "TOR \($0)" }.joined(separator: "\n")) }
+            }
+        }
         return t
     }()
     private let fileLog = SharedLog(name: "tunnel.log")
@@ -86,6 +99,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             do {
                 try bringUp()
                 log("Protection on")
+                // Started by the system, not by the app, a widget or a
+                // shortcut: Connect On Demand, or iOS bringing the tunnel back
+                // after it ended it (memory). Said, so a report shows why
+                // protection started over (SR-JMD1 on Android).
+                if !TunnelStart.isByApp(options) { log("Started by the system (on demand, or again after the system ended it)") }
                 WidgetState.set(on: true)
                 completionHandler(nil)
             } catch {
@@ -137,9 +155,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         v6 = !settings.ipv6Off && underlyingHasIPv6()
         try apply(networkSettings(v6: v6))
 
-        let fd = shroudly_tun_fd()
-        guard fd >= 0 else { throw StartError(message: "no tunnel descriptor") }
-        try startHev(fd: fd)
+        if settings.proxyOnly {
+            // The Mac's proxy points at the engine; nothing comes into the
+            // tunnel, so no hev.
+            log("Shroudly is the Mac's proxy on 127.0.0.1:\(port): apps that use the system proxy go through it, the others straight (Settings: all apps through Shroudly)")
+        } else {
+            let fd = shroudly_tun_fd()
+            guard fd >= 0 else { throw StartError(message: "no tunnel descriptor") }
+            try startHev(fd: fd)
+        }
 
         RatingStore().update { RatingSchedule.recordGoodStart(&$0, at: Date()) }
         startWatching()
@@ -169,6 +193,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         TorNotice.reset()
         dnsAround = false
         torAsk = nil
+        torAskRank = -1
         upstreamLine = nil
         clearOwnServerDown()
         return clean
@@ -211,6 +236,20 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 self.queue.async { self.dnsAround = true }
                 TorNotice.post(key: TorNotice.dnsTextKey, id: "dns-around")
             }
+            // The last way out turned off by the user, on a Mac that has it:
+            // a site no technique opens asks again, now and then
+            // (TorNotice.askAgainDue); "Use Tor" turns it on again.
+            if upstreamPath == nil && !settings.torLastResort && TorRoute.available {
+                e.onBlocked = { [weak self] host in
+                    guard let self else { return }
+                    self.queue.async {
+                        guard self.torAsk == nil, TorNotice.askAgainDue() else { return }
+                        self.log("The last way out is off and a site stays shut; asking again whether to use Tor")
+                        (self.torAsk, self.torAskRank) = TorNotice.label(had: nil, hadRank: -1, host: host)
+                        TorNotice.ask(self.torAsk ?? host)
+                    }
+                }
+            }
             e.onFallback = { [weak self] ok, what, host in
                 guard let self else { return }
                 if ok { self.logSite("\(what): no technique got through; opened through the last way out (Tor)"); TorNotice.used(what) }
@@ -220,14 +259,18 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     else {
                         self.queue.async {
                             if self.torAsk == nil { self.log("The last way out: a site needs Tor; asking before it starts") }
-                            self.torAsk = host.isEmpty ? (self.torAsk ?? "") : host.lowercased()
+                            let had = self.torAsk
+                            (self.torAsk, self.torAskRank) = TorNotice.label(had: had, hadRank: had == nil ? -1 : self.torAskRank, host: host)
+                            let shown = self.torAsk ?? ""
+                            let better = had != nil && shown != had
+                            if better { self.log("The last way out: the question now names \(shown)") }
+                            TorNotice.ask(shown, again: better)
                         }
-                        TorNotice.ask(host)
                     }
                 }
             }
             let args = EngineArgs.make(port: p, dohPort: dohPort, settings: settings, authFile: authPath, blockIps: blockIps, upstreamFile: upstreamPath,
-                                       fallbackFile: fallbackPath)
+                                       fallbackFile: fallbackPath, httpOpen: settings.proxyOnly)
             let ok = e.start(args: args)
             // Read once, at its start: the secrets are not left lying in a file.
             unlink(authPath)
@@ -274,7 +317,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         guard !stopping, let e = engine else { return }
         let cmds = Conns.commands()
         e.send(cmds.joined(separator: "\n"))
-        if cmds.count > 1 { log("Connections: \(cmds.count - 1) names you blocked are refused") }
+        var said: [String] = []
+        let b = Conns.blocked().count, t = Conns.torSites().count
+        if b > 0 { said.append("\(b) name\(b == 1 ? "" : "s") you blocked are refused") }
+        if t > 0 { said.append("\(t) site\(t == 1 ? "" : "s") you send through Tor go there first") }
+        let apps = Conns.torApps()
+        if !apps.isEmpty { said.append(TorAppsList.apps.filter { apps.contains($0.id) }.map(\.name).joined(separator: ", ") + " always through Tor") }
+        if Conns.onlyMode() { said.append("only the \(Conns.onlySites().count) listed sites are worked on, the rest go out as they are") }
+        if !said.isEmpty { log("Connections: " + said.joined(separator: "; ")) }
     }
 
     // MARK: block ads and trackers
@@ -356,7 +406,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func ownServerDown(_ why: String?) {
         let d = AppGroup.defaults
-        d.set(OwnServer.whyCode(why), forKey: OwnServer.Down.why)
+        d.set(OwnServer.localIf(OwnServer.whyCode(why), host: settings.ownServerLink?.host), forKey: OwnServer.Down.why)
         d.set(Date().timeIntervalSince1970, forKey: OwnServer.Down.at)
         d.set(settings.ownServerLink.map(OwnServer.describe) ?? "", forKey: OwnServer.Down.server)
     }
@@ -380,7 +430,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let oldPort = port, oldAuth = auth
         do {
             port = try spawnEngine(keep: true)
-            if port != oldPort || auth != oldAuth {
+            if settings.proxyOnly {
+                // The Mac's proxy names the port: set again when it moved.
+                if port != oldPort { try apply(networkSettings(v6: v6)) }
+            } else if port != oldPort || auth != oldAuth {
                 // hev still sends to the old port with the old password.
                 restartHev()
             }
@@ -419,6 +472,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private func networkSettings(v6: Bool) -> NEPacketTunnelNetworkSettings {
         let s = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         s.mtu = NSNumber(value: TunnelConfig.mtu)
+        if settings.proxyOnly {
+            // The Mac (AppSettings.proxyOnly): no route into the tunnel, the
+            // engine as the system's HTTP and HTTPS proxy, as the desktop app
+            // sets it; this Mac's own and local addresses go straight.
+            let v4 = NEIPv4Settings(addresses: [TunnelConfig.addressV4], subnetMasks: ["255.255.255.255"])
+            v4.includedRoutes = []
+            s.ipv4Settings = v4
+            let p = NEProxySettings()
+            let server = NEProxyServer(address: "127.0.0.1", port: port)
+            p.httpEnabled = true
+            p.httpServer = server
+            p.httpsEnabled = true
+            p.httpsServer = server
+            p.excludeSimpleHostnames = true
+            p.exceptionList = ["localhost", "*.local", "127.0.0.1", "::1", "169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+            // Every name, not only some domains (the tunnel is not the
+            // default route here).
+            p.matchDomains = [""]
+            s.proxySettings = p
+            return s
+        }
         let v4 = NEIPv4Settings(addresses: [TunnelConfig.addressV4], subnetMasks: ["255.255.255.255"])
         v4.includedRoutes = [NEIPv4Route.default()]
         s.ipv4Settings = v4
@@ -542,7 +616,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             case .health:
                 let e = engine
                 reply["engine"] = e?.running == true && Date().timeIntervalSince(e?.lastOutputAt ?? .distantPast) < Self.hungAfter
-                reply["tunnel"] = hev?.running == true
+                reply["tunnel"] = settings.proxyOnly || hev?.running == true
             case .siteLog:
                 siteLock.lock(); reply["lines"] = sites; siteLock.unlock()
             case .conns:

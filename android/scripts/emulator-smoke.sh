@@ -432,9 +432,14 @@ else
 fi
 fresh="$(resolved)"
 [ "$fresh" != "$before" ] || fail "the restarted tunnel gave out the old stand-in address $before again"
+# An app that kept the old address (TikTok does) is taken by the name its
+# request carries (core/src/engine.c, standin_name): the site it names, never
+# whatever the address now stands for; one that names nothing is closed.
 stale="$(http_get_at "$before")"
-grep -q '^HTTP/1' <<<"$stale" && fail "a stand-in address from the old tunnel ($before) still reached something"
-say "tunnel restarted: example.com -> $fresh; the old $before is refused, never another site"
+grep -q '^HTTP/1' <<<"$stale" || fail "an app that kept the old stand-in address ($before) did not reach the site its request names"
+nameless="$(sh_ "(printf 'hello\r\n'; sleep 4) | timeout 12 $NC $QUIT -w 8 $before 80 | head -c 64" | tr -d '\r\n')"
+[ -z "$nameless" ] || fail "a connection to the old stand-in address that names no site got an answer ($nameless)"
+say "tunnel restarted: example.com -> $fresh; the old $before goes on by the name its request carries, and one that names nothing is closed"
 
 # ── the network changes ──────────────────────────────────────────────────
 # Wi-Fi off only where mobile data is up to take over (an emulator's radio
@@ -833,13 +838,17 @@ window() {
     sh_ "am start -W -n $PKG/.MainActivity" >/dev/null
   fi
 }
+# The links and Share logs are on the About tab, as on the desktop.
+about_tab() { sh_ "am start -W -n $PKG/.MainActivity --es me.codeshare.shroudly.TAB ABOUT" >/dev/null; sleep 2; }
 ui_has() { sh_ "uiautomator dump /sdcard/ui.xml" >/dev/null; grep -q -- "$1" <<<"$(sh_ "cat /sdcard/ui.xml")"; }
 # The rows are at the bottom, more than a small screen shows at once: from
-# the top, a little further down each time until the text is on screen.
+# the top, a little further down each time until the text is on screen. The
+# About tab grew (Logs, Follow, donations): on API 28's small screen ten
+# steps no longer reached "Release notes", so up to thirty.
 ui_seek() {
   local i
   for _ in 1 2 3; do sh_ "input swipe 160 150 160 600 200" >/dev/null; done
-  for i in 1 2 3 4 5 6 7 8 9 10; do
+  for i in $(seq 1 30); do
     ui_has "$1" && return 0
     sh_ "input swipe 160 450 160 250 400" >/dev/null
     sleep 1
@@ -856,6 +865,7 @@ sh_ "input keyevent KEYCODE_BACK" >/dev/null
 say "a phone proxy where nothing runs (127.0.0.1:1): the window says so"
 window
 wait_for 20 has_log "Updates: GitHub" || fail "installed from a file, the window does not look for updates on GitHub"
+about_tab
 wait_for 40 ui_seek 'text="Release notes"' || fail "no GitHub releases link"
 wait_for 40 ui_seek 'text="Privacy policy"' || fail "no privacy policy link"
 say "installed from a file: updates from GitHub, links Release notes and Privacy policy"
@@ -863,6 +873,7 @@ adb_ install -r -i com.android.vending "$APK" >/dev/null || fail "install as Goo
 say "installer now: $(sh_ "dumpsys package $PKG" | grep -m1 'installerPackageName=' | sed 's/^ *//')"
 window
 wait_for 20 has_log "Updates: Google Play" || fail "installed by Google Play, the window still looks for updates on GitHub"
+about_tab
 wait_for 40 ui_seek 'text="Source code on GitHub"' || fail "installed by Google Play, the window still links the GitHub releases"
 ui_has 'text="Release notes"' && fail "installed by Google Play, the window still links the GitHub releases"
 say "installed by Google Play: no GitHub update check, links the source code instead"
@@ -889,7 +900,7 @@ sh_ "input keyevent KEYCODE_BACK" >/dev/null
 sh_ "am force-stop $PKG" >/dev/null
 # A long press on the Quick Settings tile (issue #35): Android opens the
 # activity of the tile's package that takes QS_TILE_PREFERENCES, else App info.
-tile_pref() { grep -q "$PKG/.MainActivity\|$PKG/$PKG.MainActivity" <<<"$(sh_ "cmd package query-activities --brief -a android.service.quicksettings.action.QS_TILE_PREFERENCES -p $PKG")"; }
+tile_pref() { grep -q "$PKG/.HomeActivity\|$PKG/$PKG.HomeActivity\|$PKG/.MainActivity\|$PKG/$PKG.MainActivity" <<<"$(sh_ "cmd package query-activities --brief -a android.service.quicksettings.action.QS_TILE_PREFERENCES -p $PKG")"; }
 tile_pref || fail "a long press on the tile would open App info: no activity for QS_TILE_PREFERENCES ($(sh_ "cmd package query-activities --brief -a android.service.quicksettings.action.QS_TILE_PREFERENCES -p $PKG" | tr '\n' ' '))"
 # As SystemUI does it: the activity resolved in the tile's package, started by name.
 tile_act="$(sh_ "cmd package query-activities --brief -a android.service.quicksettings.action.QS_TILE_PREFERENCES -p $PKG" | grep -o "$PKG/[A-Za-z0-9_.]*" | head -1)"

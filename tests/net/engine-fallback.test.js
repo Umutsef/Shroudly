@@ -63,7 +63,9 @@ async function get(P, host, port, timeoutMs = 40000) {
   await new Promise((r) => silent.listen({ port: 0, host: '::1', ipv6Only: true }, r));
   const silentPort = silent.address().port;
 
-  const dns = await H.dnsStub({ 'dropped.example': { AAAA: ['::1'] }, 'cdn.dropped.example': { AAAA: ['::1'] } });
+  // gone.example: encrypted DNS never answers for it (its lookup refused).
+  const dns = await H.dnsStub({ 'dropped.example': { AAAA: ['::1'] }, 'cdn.dropped.example': { AAAA: ['::1'] }, 'gone.example': { silent: true },
+    'www.roblox.com': { AAAA: ['::1'] }, 'img.dropped.example': { AAAA: ['::1'] }, 'c0.rbxcdn.com': { AAAA: ['::1'] } });
   const base = ['--auto', '--doh', '--doh-port', String(dns.port), '--ipv6'];
 
   {
@@ -76,6 +78,15 @@ async function get(P, host, port, timeoutMs = 40000) {
       `a name with no address to be reached comes back through the last way out, asked by name (${a}, ${JSON.stringify(tor.asked)})`);
     await H.sleep(200);
     t.ok((eng.out.match(/"type":"fallback","ok":1,"host":"gone\.example"/g) || []).length === 1, 'and the engine says so once');
+
+    /* A name encrypted DNS says does not exist (NXDOMAIN): Tor cannot reach
+     * it either, so it is not started for it (OPPO's retired telemetry name
+     * started Tor at every Start). */
+    const asked = tor.asked.length;
+    const nx = await get(P, 'nosuch.example', 443, 8000);
+    await H.sleep(200);
+    t.ok(nx !== 'HTTP/1.1 200 OK' && tor.asked.length === asked && !/"type":"fallback"[^\n]*nosuch\.example/.test(eng.out),
+      `a name that does not exist is not sent to the last way out (${nx}, ${tor.asked.length - asked} asked)`);
 
     // Silent to every technique: the ladder gives up, then the last way out.
     const t0 = Date.now();
@@ -128,7 +139,131 @@ async function get(P, host, port, timeoutMs = 40000) {
     const sibLadder = /"type":"blocked","host":"cdn\.dropped\.example"/.test(eng.out);
     t.ok(b === 'HTTP/1.1 200 OK' && tor.asked.length === n0 + 2 && sibLadder && sib < 12000 && sib < first,
       `another name of that site: the techniques first, briefly, then Tor (${sib} ms against ${first} ms)`);
+    /* An app that gives up on each connection after two seconds (Instagram
+     * on Irancell), for another name of that site: it never waits out a
+     * ladder, so the ladder never reached Tor. After a few, its next
+     * connection goes there at once. */
+    const n1 = tor.asked.length;
+    for (let i = 0; i < 4; i++) await get(P, 'img.dropped.example', silentPort, 2000);
+    await H.sleep(300);
+    const t3 = Date.now();
+    const imp = await get(P, 'img.dropped.example', silentPort, 15000);
+    const quick = Date.now() - t3;
+    t.ok(imp === 'HTTP/1.1 200 OK' && quick < 3000 && tor.asked.slice(n1).some((a) => a.host === 'img.dropped.example'),
+      `an app too impatient for the ladder: after a few, that name goes straight to Tor (${imp} in ${quick} ms)`);
+    /* Another domain of the same service (SITE_FAMILY: roblox.com and
+     * rbxcdn.com) is not "that site": it keeps its whole ladder. Since 2.6.58
+     * the family was taken for one site here, and the game's maps and items
+     * on rbxcdn.com went to Tor after 6 s because a roblox.com name had. */
+    await get(P, 'www.roblox.com', silentPort, 60000);
+    const t2 = Date.now();
+    await get(P, 'c0.rbxcdn.com', silentPort, 60000);
+    const fam = Date.now() - t2;
+    t.ok(fam > 12000, `another domain of the same service keeps its whole ladder (${fam} ms against ${sib} ms)`);
     eng.stop();
+  }
+
+  // A site the network lets open and then cuts, every time (Iran's
+  // WhatsApp): after a few, its next connection goes to the last way out.
+  {
+    // A censor in front of a working site: the handshake passes, the request
+    // is answered with a reset.
+    const site = tls.createServer(H.testServerOptions(), (s) => { s.on('error', () => {}); s.on('data', () => {}); });
+    await new Promise((r) => site.listen(0, '127.0.0.1', r));
+    const cutter = net.createServer((c) => {
+      const u = net.connect(site.address().port, '127.0.0.1');
+      const sawRequest = H.requestWatcher();
+      c.on('error', () => {}); u.on('error', () => {});
+      c.on('data', (d) => { if (sawRequest(d)) { c.resetAndDestroy(); u.destroy(); return; } u.write(d); });
+      u.on('data', (d) => { if (!c.destroyed) c.write(d); });
+    });
+    await new Promise((r) => cutter.listen({ port: 0, host: '::1', ipv6Only: true }, r));
+    const cutPort = cutter.address().port;
+    const dns2 = await H.dnsStub({ 'cut.example': { AAAA: ['::1'] } });
+    const P = await H.freePort();
+    const eng = await H.startEngine(P, ['--auto', '--doh', '--doh-port', String(dns2.port), '--ipv6', '--fallback-file', torFile]);
+    const n0 = tor.asked.length;
+    const seen = [];
+    for (let i = 0; i < 4; i++) seen.push(await get(P, 'cut.example', cutPort, 20000));
+    const cuts = (eng.out.match(/"type":"cut","host":"cut\.example"/g) || []).length;
+    t.ok(cuts >= 3 && tor.asked.length > n0 && tor.asked[tor.asked.length - 1].host === 'cut.example' && seen[seen.length - 1] === 'HTTP/1.1 200 OK',
+      `cut once open, again and again (${cuts} cuts): its next connection goes through the last way out (${seen.join(', ')})`);
+    eng.stop(); cutter.close(); site.close(); dns2.close();
+  }
+
+  // Frozen after about 16 KB, as Russia's filters do to Cloudflare's
+  // addresses: the very next connection goes to the last way out.
+  {
+    const big = 'x'.repeat(200 * 1024);
+    const site = tls.createServer(H.testServerOptions(), (s) => {
+      s.on('error', () => {});
+      s.once('data', () => s.write(`HTTP/1.1 200 OK\r\nContent-Length: ${big.length}\r\nConnection: close\r\n\r\n${big}`));
+    });
+    await new Promise((r) => site.listen(0, '127.0.0.1', r));
+    const freezer = net.createServer((c) => {
+      const u = net.connect(site.address().port, '127.0.0.1');
+      let down = 0;
+      c.on('error', () => {}); u.on('error', () => {});
+      c.on('data', (d) => u.write(d));
+      // Everything up to 16 KB, then nothing more: the connection stays open.
+      u.on('data', (d) => { if (down >= 16 * 1024 || c.destroyed) return; const part = d.subarray(0, 16 * 1024 - down); down += part.length; c.write(part); });
+    });
+    await new Promise((r) => freezer.listen({ port: 0, host: '::1', ipv6Only: true }, r));
+    const dns3 = await H.dnsStub({ 'frozen.example': { AAAA: ['::1'] } });
+    const P = await H.freePort();
+    const eng = await H.startEngine(P, ['--auto', '--doh', '--doh-port', String(dns3.port), '--ipv6', '--fallback-file', torFile]);
+    const n0 = tor.asked.length;
+    const first = await get(P, 'frozen.example', freezer.address().port, 14000);
+    await H.sleep(500);
+    const stall = /"type":"cut","host":"frozen\.example","strategy":"stall","attempts":1[2-9]/.test(eng.out) || /"type":"cut","host":"frozen\.example","strategy":"stall","attempts":2[0-4]/.test(eng.out);
+    const second = await get(P, 'frozen.example', freezer.address().port, 20000);
+    t.ok(stall && first !== 'HTTP/1.1 200 OK' && second === 'HTTP/1.1 200 OK' && tor.asked.length === n0 + 1 && tor.asked[tor.asked.length - 1].host === 'frozen.example',
+      `frozen after 16 KB once: the next connection goes through the last way out (${first}, then ${second})`);
+    eng.stop(); freezer.close(); site.close(); dns3.close();
+  }
+
+  /* Frozen at the same amount each time while the site's other names answer
+   * (Iran, Shatel: abs.twimg.com at 43 to 46 KB beside x.com working): the
+   * third time says it is the network, and the next connection goes to the
+   * last way out. */
+  {
+    const big = 'x'.repeat(200 * 1024);
+    const site = tls.createServer(H.testServerOptions(), (s) => {
+      s.on('error', () => {});
+      s.once('data', () => s.write(`HTTP/1.1 200 OK\r\nContent-Length: ${big.length}\r\nConnection: close\r\n\r\n${big}`));
+    });
+    await new Promise((r) => site.listen(0, '127.0.0.1', r));
+    const small = tls.createServer(H.testServerOptions(), (s) => {
+      s.on('error', () => {});
+      s.once('data', () => s.end('HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok'));
+    });
+    await new Promise((r) => small.listen({ port: 0, host: '::1', ipv6Only: true }, r));
+    const LIMIT = 46 * 1024;
+    const freezer = net.createServer((c) => {
+      const u = net.connect(site.address().port, '127.0.0.1');
+      let down = 0;
+      c.on('error', () => {}); u.on('error', () => {});
+      c.on('data', (d) => u.write(d));
+      u.on('data', (d) => { if (down >= LIMIT || c.destroyed) return; const part = d.subarray(0, LIMIT - down); down += part.length; c.write(part); });
+    });
+    await new Promise((r) => freezer.listen({ port: 0, host: '::1', ipv6Only: true }, r));
+    const dns4 = await H.dnsStub({ 'cdn.slowed.example': { AAAA: ['::1'] }, 'www.slowed.example': { AAAA: ['::1'] } });
+    const P = await H.freePort();
+    const eng = await H.startEngine(P, ['--auto', '--doh', '--doh-port', String(dns4.port), '--ipv6', '--fallback-file', torFile]);
+    const n0 = tor.asked.length;
+    const seen = [];
+    for (let i = 0; i < 3; i++) {
+      // The site's own page answers each time: every cut is "site_ok".
+      await get(P, 'www.slowed.example', small.address().port, 8000);
+      seen.push(await get(P, 'cdn.slowed.example', freezer.address().port, 12000));
+      await H.sleep(300);
+    }
+    const cuts = (eng.out.match(/"type":"cut","host":"cdn\.slowed\.example","strategy":"stall","attempts":4[3-7][^\n]*site_ok/g) || []).length;
+    const before = tor.asked.length;
+    const after = await get(P, 'cdn.slowed.example', freezer.address().port, 20000);
+    t.ok(cuts === 3 && before === n0 && after === 'HTTP/1.1 200 OK' && tor.asked.length === n0 + 1 && tor.asked[tor.asked.length - 1].host === 'cdn.slowed.example',
+      `frozen at about 46 KB three times beside a site that answers: the next connection goes through the last way out (${cuts} cuts, ${seen.join(', ')}, then ${after})`);
+    eng.stop(); freezer.close(); site.close(); small.close(); dns4.close();
   }
 
   // The user's own server set: it carries everything, the last way out is not used.
@@ -143,15 +278,46 @@ async function get(P, host, port, timeoutMs = 40000) {
     eng.stop(); own.close();
   }
 
-  // Not running yet: the connection fails as before, and the engine says so.
+  /* An app's own connection to an address the network blocks (Telegram's
+   * 149.154.167.92 in Iran): no name, no TLS, and still the last way out
+   * carries it, asked by that address (TEST-NET-1 answers nobody). */
+  {
+    const P = await H.freePort();
+    const eng = await H.startEngine(P, [...base, '--fallback-file', torFile]);
+    const n0 = tor.asked.length;
+    const tr = Date.now();
+    let r = 'refused';
+    try {
+      const s = await H.socks(P, '192.0.2.1', 443);
+      r = await new Promise((res) => {
+        let o = '';
+        s.on('data', (d) => { o += d; }); s.on('end', () => res(o)); s.on('error', () => res('error'));
+        s.write('\x00\x01 an app protocol, not TLS');
+        setTimeout(() => res(`timeout ${o}`), 30000);
+      });
+    } catch {}
+    // The stand-in world speaks TLS, so it closes on these bytes: what
+    // counts is that the engine said yes and went through the last way out.
+    t.ok(r !== 'refused' && tor.asked.length === n0 + 1 && tor.asked[n0].atyp === 1 && tor.asked[n0].host === '192.0.2.1',
+      `an app's connection to an address that does not answer goes through the last way out by address (${Date.now() - tr} ms, ${JSON.stringify(tor.asked.slice(n0))})`);
+    eng.stop();
+  }
+
+  // Not running yet: the connection fails as before, and the engine says so
+  // once the name has stayed out of reach for ten seconds (BG_ASK_MS in
+  // engine.c: a network gone for a moment is not what Tor is started, or the
+  // user asked, for; engine-search.test.js has the name that comes back).
   {
     const deadPort = await H.freePort();
     const P = await H.freePort();
     const eng = await H.startEngine(P, [...base, '--fallback-file', file('dead.txt', `socks5://127.0.0.1:${deadPort}`)]);
-    const r = await get(P, 'gone.example', 443, 15000);
+    const said = () => /"type":"fallback","ok":0,"why":"does not answer","host":"www\.roblox\.com"/.test(eng.out);
+    const r = await get(P, 'www.roblox.com', await H.freePort(), 15000);   // its address takes no connection
     await H.sleep(300);
-    t.ok(r !== 'HTTP/1.1 200 OK' && /"type":"fallback","ok":0,"why":"does not answer","host":"gone\.example"/.test(eng.out),
-      `not running: the connection fails as before (${r}), and the engine says so, which starts it`);
+    const atOnce = said();
+    for (let i = 0; i < 300 && !said(); i++) await H.sleep(100);
+    t.ok(r !== 'HTTP/1.1 200 OK' && !atOnce && said(),
+      `not running: the connection fails as before (${r}), and the engine says so a moment later, which starts it`);
     eng.stop();
   }
 

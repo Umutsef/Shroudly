@@ -70,18 +70,21 @@ function load(rel) {
     const NN = require(path.join(ROOT, 'electron', 'national-net.js'));
     const zones = N.NOT_FROM.flatMap((c) => NN.ZONES[c].map((z) => [z, c]));
     t.ok(zones.length > 30 && zones.every(([z]) => sw.includes(`"${z}"`)), `iPhone: every time zone of those countries, as the desktop has them (${zones.length})`);
+    // The same countries where helping others is not offered at all.
+    t.ok(NN.TOR_BLOCKED.join() === N.NOT_FROM.join() && NN.torBlocked('ir') && !NN.torBlocked('TR') && !NN.torBlocked(''),
+      'the main process hides helping others in the same countries');
   }
   {
     const WN = require(path.join(ROOT, 'electron', 'whats-new.js'));
     const store = (init = {}) => { const m = { ...init }; return { get: (k) => m[k], set: (k, v) => { m[k] = v; }, m }; };
     let s = store();
-    t.ok(WN.note(s, { current: '2.6.48', firstRun: true }) === null && s.m.lastVersionSeen === '2.6.48' && s.m.whatsNew === undefined, 'a new install: nothing to tell');
+    t.ok(WN.note(s, { current: '2.6.48', firstRun: true, text: 'A' }) === null && s.m.lastVersionSeen === '2.6.48' && s.m.whatsNew === undefined, 'a new install: nothing to tell');
     s = store({ language: 'tr' });
-    t.ok(WN.note(s, { current: '2.6.48', firstRun: false }) === '2.6.48' && s.m.whatsNew === '2.6.48', 'from before 2.6.48 (no version kept): told');
-    t.ok(WN.note(s, { current: '2.6.48' }) === null && s.m.whatsNew === '2.6.48', 'the same version again: kept until the card is closed');
+    t.ok(WN.note(s, { current: '2.6.48', firstRun: false, text: 'A' }) === '2.6.48' && s.m.whatsNew === '2.6.48', 'from before 2.6.48 (no version kept): told');
+    t.ok(WN.note(s, { current: '2.6.48', text: 'A' }) === null && s.m.whatsNew === '2.6.48', 'the same version again: kept until the card is closed');
     s.m.whatsNew = null;
-    t.ok(WN.note(s, { current: '2.6.48' }) === null && s.m.whatsNew === null, 'closed: not again');
-    t.ok(WN.note(s, { current: '2.6.49' }) === '2.6.49' && s.m.whatsNew === '2.6.49' && s.m.lastVersionSeen === '2.6.49', 'the next update: told again');
+    t.ok(WN.note(s, { current: '2.6.48', text: 'A' }) === null && s.m.whatsNew === null, 'closed: not again');
+    t.ok(WN.note(s, { current: '2.6.49', text: 'B' }) === '2.6.49' && s.m.whatsNew === '2.6.49' && s.m.lastVersionSeen === '2.6.49', 'the next update: told again');
     const ktW = src('android/app/src/main/java/me/codeshare/shroudly/WhatsNew.kt');
     const swW = src('apple/Shared/WhatsNew.swift');
     t.ok(/lastSeen == null -> if \(updatedSinceInstall\) current else null/.test(ktW) && /if lastSeen == nil \{ return usedBefore \? current : nil \}/.test(swW),
@@ -92,11 +95,12 @@ function load(rel) {
     // changes with every release; that each platform has some does not.
     const en = JSON.parse(src('locales/en.json'));
     const lines = (k) => en[k].split('\n').filter(Boolean).length;
-    t.ok(['whatsNewDesktop', 'whatsNewAndroid', 'whatsNewApple'].every((k) => lines(k) >= 1 && en[k].split('\n').every((l) => l.trim() && l.length <= 200)),
+    // None for a platform a version changes nothing on: no window there.
+    t.ok(['whatsNewDesktop', 'whatsNewAndroid', 'whatsNewApple', 'whatsNewMac'].every((k) => en[k].trim() === '' || en[k].split('\n').every((l) => l.trim() && l.length <= 200)),
       'the notes, a short line each, for every platform');
     for (const f of fs.readdirSync(path.join(ROOT, 'locales'))) {
       const j = JSON.parse(src(`locales/${f}`));
-      if (['whatsNewDesktop', 'whatsNewAndroid', 'whatsNewApple'].some((k) => j[k].split('\n').filter(Boolean).length !== lines(k))) t.ok(false, `${f}: as many lines as English`);
+      if (['whatsNewDesktop', 'whatsNewAndroid', 'whatsNewApple', 'whatsNewMac'].some((k) => j[k].split('\n').filter(Boolean).length !== lines(k))) t.ok(false, `${f}: as many lines as English`);
     }
     t.ok(true, 'every language has as many lines as English');
   }
@@ -183,8 +187,8 @@ function load(rel) {
     t.ok(/<WhatsNewBanner show=\{activeTab === 'control'\} news=\{news\} \/>\s*<SupportBanner/.test(page) && /<SupportBanner[^\n]*\/>\s*<HelpBanner show=\{helpCard\} help=\{help\} \/>/.test(page)
       && /const helpCard = activeTab === 'control' && active && !notRouting && !offline && !ownServerDown;/.test(page),
     'the main window: what changed, then the support card, then the card asking for help, one at a time and only while protection works');
-    t.ok(/ownServerExit \? t\('ownServerExit', \{ ip: ownServerExit\.ip \}\)/.test(control) && /path: \[t\('navSettings'\), t\('tabSharing'\), t\('ownServer'\)\]/.test(control),
-      'the panel: the address sites see under "Protected"; the way to the server by its tab');
+    t.ok(/ownServerExit \? t\('ownServerExit', \{ ip: exitWithPlace\(ownServerExit\.ip, ownServerExit\.loc, language\) \}\)/.test(control) && /path: \[t\('navSettings'\), t\('tabSharing'\), t\('ownServer'\)\]/.test(control),
+      'the panel: the address sites see under "Protected", with its country (#60); the way to the server by its tab');
     t.ok(/ownServerExit: \(engine && engine\.isActive\(\) && engine\.advice && engine\.advice\.ownServerExit\) \|\| null/.test(src('electron/main.js'))
       && /this\._watchExit\(\);\n    return \{ success: true \};/.test(src('electron/engine-manager.js')), 'main.js and the engine: the address watched after each start, and passed on');
   }

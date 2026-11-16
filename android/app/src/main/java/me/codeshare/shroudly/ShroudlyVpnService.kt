@@ -115,6 +115,8 @@ class ShroudlyVpnService : VpnService() {
         private const val RECHECK_MS = 35_000L
         // How long hev may take to stop.
         private const val TUNNEL_STOP_MS = 5_000L
+        /* A stop not through by then ends the process (StopDeadline). */
+        const val STOP_DEADLINE_MS = 15_000L
         private const val LOG_FILE = "log.txt"
 
         /* Only once the user has allowed the VPN (VpnService.prepare() gives
@@ -132,10 +134,13 @@ class ShroudlyVpnService : VpnService() {
             return true
         }
 
-        fun stop(ctx: Context) {
+        fun stop(ctx: Context, by: String = "the app") {
             if (Protection.state == Protection.State.OFF) return
-            ctx.startService(Intent(ctx, ShroudlyVpnService::class.java).setAction(ACTION_STOP))
+            ctx.startService(Intent(ctx, ShroudlyVpnService::class.java).setAction(ACTION_STOP).putExtra(EXTRA_BY, by))
         }
+
+        /* Where a stop came from, for the log. */
+        const val EXTRA_BY = "me.codeshare.shroudly.BY"
 
         /* The app's log (AppLog) keeps its lines in the app's files from here on. */
         fun attachLog(ctx: Context) {
@@ -178,7 +183,7 @@ class ShroudlyVpnService : VpnService() {
         }
 
         fun openApp(ctx: Context): PendingIntent = PendingIntent.getActivity(
-            ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            ctx, 0, Intent(ctx, HomeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
     }
@@ -240,6 +245,9 @@ class ShroudlyVpnService : VpnService() {
     // Tunnels started in this session (the first one, and any restart).
     private var tunnelStarts = 0
     private var pathRestartedAt = 0L
+    // When a routine path check that found the way through was last said
+    // (PathWatch.sayRoutine): 0 after a start.
+    private var routineSaidAt = 0L
     // Under lockdown, how long until everything is tried again (0: not held).
     private val hold = LockdownHold(HOLD_FIRST_MS, HOLD_MAX_MS) { ms, run -> work.schedule(run, ms, TimeUnit.MILLISECONDS) }
     private val hevWatch = HevWatch()
@@ -250,6 +258,8 @@ class ShroudlyVpnService : VpnService() {
     // The notice that protection ended was posted moments ago: not again.
     private var quietNotice = false
     @Volatile private var active = false
+    // The sites that made Tor start, said once each (EngineEvent.Fallback).
+    private val torNeedTold = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
     // Health: which engine the checks under way are about (a result about an
     // engine replaced meanwhile is dropped).
     private var healthEpoch = 0
@@ -263,7 +273,7 @@ class ShroudlyVpnService : VpnService() {
     private val told = HashSet<String>()
     // Apps whose own connections (not TLS or HTTP) cannot get through.
     private val rawWatch by lazy {
-        RawWatch(RawApps(try { assets.open("raw-apps.txt").bufferedReader().readLines() } catch (_: Exception) { emptyList() })) {
+        RawWatch(RawApps.of(this)) {
             // Never told without a network under the VPN, nor while nothing
             // else comes back either.
             underlyingId != null && SystemClock.elapsedRealtime() - lastDownAt <= RAW_NETWORK_WORKS_MS
@@ -288,9 +298,15 @@ class ShroudlyVpnService : VpnService() {
         attachLog(this)
     }
 
+    // The newest start's id: a stop finishing as another start comes in
+    // leaves the service to that start (finish, stopSelfResult).
+    @Volatile private var lastStartId = 0
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
             ACTION_STOP -> {
+                if (active) log("Stop asked from ${intent.getStringExtra(EXTRA_BY) ?: "the notification"}")
                 // Asked to stop before it ever started: still owe startForeground.
                 if (!active && Protection.state == Protection.State.OFF) {
                     stopSelf()
@@ -354,7 +370,11 @@ class ShroudlyVpnService : VpnService() {
             }
             ACTION_CONNS -> {
                 val what = intent.getStringExtra("what") ?: "CONNS"
-                if (active && Regex("^(CONNS|BLOCK [a-z0-9._:-]{1,253}|UNBLOCK [a-z0-9._:-]{1,253})$").matches(what)) later { engine?.send(what) }
+                if (active && Conns.COMMAND.matches(what)) later { engine?.send(what) }
+                // Tor just became ready (TorRoute): the sites and apps sent
+                // through it are given again, which ends their connections
+                // made the usual way meanwhile, so they connect through Tor.
+                else if (active && what == Conns.TOR_AGAIN) later { Conns.torEntries(this).takeIf { it.isNotEmpty() }?.let { t -> engine?.send(t.joinToString("\n") { "TOR $it" }) } }
                 if (!active && Protection.state == Protection.State.OFF) stopSelf()
                 return stickyWhileOn()
             }
@@ -373,8 +393,14 @@ class ShroudlyVpnService : VpnService() {
             // ACTION_START, the system's always-on VPN, or a restart after the
             // process was killed (START_STICKY): all mean "be on".
             else -> {
-                // Started again after Android ended the process while on.
-                if (intent == null) Usage.endedByAndroid(this)
+                // Started again after Android ended the process while on. Said
+                // in the log: without it a report showed the engine starting
+                // over and over and nothing of why (SR-JMD1: Roblox and a
+                // WhatsApp call on a phone that ends apps to save memory).
+                if (intent == null) {
+                    Usage.endedByAndroid(this)
+                    log("Android ended the app while protection was on and started it again (memory or battery saving)")
+                }
                 requestStart(bySystem = intent?.action != ACTION_START)
             }
         }
@@ -439,6 +465,8 @@ class ShroudlyVpnService : VpnService() {
     private fun requestStop(errorRes: Int, detail: String?) {
         if (Protection.state == Protection.State.OFF || Protection.state == Protection.State.STOPPING) return
         Protection.set(Protection.State.STOPPING)
+        // Whatever holds the work thread up, a stop always ends (StopDeadline).
+        StopDeadline.arm { log(it) }
         // Off by the user's choice (or another VPN's): it stays off. Ended by
         // itself: it comes back once a network is there (KeepOn).
         if (errorRes == 0 || errorRes == R.string.androidVpnRevoked) KeepOn.stoppedByUser(this)
@@ -463,8 +491,22 @@ class ShroudlyVpnService : VpnService() {
     }
 
     private fun finish() {
+        // The newest start when this stop is decided: one after it keeps the
+        // service (stopSelfResult below).
+        val id = lastStartId
+        // Started again while this stop finished (an automation app's Stop
+        // then Start, or Toggle twice): that start has the service now, its
+        // notice included. Up to 2.6.58 the stop ended the service under it,
+        // and the start failed ("rejected from" the executor).
+        if (Protection.state != Protection.State.OFF) { refreshTile(); return }
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        // Only if no start came in since: one that did keeps the service,
+        // and its notice, which the line above may have just taken away.
+        if (!stopSelfResult(id)) {
+            if (Protection.state != Protection.State.OFF) goForeground(starting = Protection.state != Protection.State.ON)
+            refreshTile()
+            return
+        }
         refreshTile()
         if (restartProcess || Engine.busy) endProcess()
     }
@@ -482,6 +524,7 @@ class ShroudlyVpnService : VpnService() {
     /* ── start ─────────────────────────────────────────────────────────── */
 
     private fun startAll() {
+        Conns.newSession()
         try {
             val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
             if (prefs.contains(OLD_PID_KEY)) prefs.edit().remove(OLD_PID_KEY).apply()
@@ -564,6 +607,7 @@ class ShroudlyVpnService : VpnService() {
                 pathRestartedAt = SystemClock.elapsedRealtime()
             }
             poll = work.scheduleWithFixedDelay({ tick() }, 1, 1, TimeUnit.SECONDS)
+            routineSaidAt = 0L
             log("Protection on: engine on 127.0.0.1:$port${if (auth != null) " (password)" else ""}, " +
                 "encrypted DNS on ${if (dohPort > 0) "127.0.0.1:$dohPort" else "none"}, IPv6 ${if (v6Routed) "routed" else "off"}; " +
                 "network: ${if (under == null) "none" else Net.describe(cm, under.first, under.second)}")
@@ -606,7 +650,7 @@ class ShroudlyVpnService : VpnService() {
             val e = Engine(::log, ::logSite, ::onEngineEvent, ::onEngineExit)
             engine = e
             val ok = e.start(Engine.args(p, dohPort, blockIps, authFile, Engine.FAKE_NET, AdBlock.listFile(this), AdBlock.allow(this), AppSettings.strategy(this), AppSettings.customDnsStrict(this),
-                AppSettings.quicOff(this), AppSettings.ipv6Off(this), upstream, AppSettings.decoyNames(this), fallback))
+                AppSettings.quicOff(this), AppSettings.ipv6Off(this), upstream, AppSettings.decoyNames(this), fallback, RemoteConfig.engineArgs(this)))
             // Read once, at its start: the secrets are not left lying in a file.
             authFile?.delete()
             upstream?.delete()
@@ -652,9 +696,12 @@ class ShroudlyVpnService : VpnService() {
             .setSession(getString(R.string.app_name))
             .setMtu(TunnelConfig.MTU)
             .addAddress(TunnelConfig.ADDRESS_V4, 32)
-            .addRoute("0.0.0.0", 0)
             .addDnsServer(TunnelConfig.DNS_V4)
             .setConfigureIntent(openApp(this))
+        // Everything but the local network and multicast (TunnelConfig.LOCAL_V4):
+        // casting, a TV's discovery and the local network's own answers stay
+        // off the VPN.
+        for ((a, len) in TunnelConfig.routesV4()) b.addRoute(a, len)
         // Only the apps chosen (Settings, #60): every other one, this app
         // among them, straight out. Android takes one way or the other, never
         // both; with none of them installed any more, the usual way.
@@ -679,7 +726,13 @@ class ShroudlyVpnService : VpnService() {
         if ((only > 0 || skip > 0) && lockdown()) log("Lockdown: the ${if (only > 0) "apps not chosen" else "$skip apps left out"} have no internet while Android blocks connections without a VPN")
         // Without an IPv6 address and route, Android answers apps' IPv6 with
         // "unreachable" at once, and they use IPv4.
-        if (v6) b.addAddress(TunnelConfig.ADDRESS_V6, 128).addRoute("::", 0)
+        if (v6) {
+            b.addAddress(TunnelConfig.ADDRESS_V6, 128).addRoute("::", 0)
+            // The local network's IPv6 and multicast off the VPN (Android 13+).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) for ((a, len) in TunnelConfig.LOCAL_V6) {
+                try { b.excludeRoute(android.net.IpPrefix(java.net.InetAddress.getByName(a), len)) } catch (_: Exception) {}
+            }
+        }
         // Metered exactly when the network underneath is. From Android 10 a
         // VPN counts as metered unless it says otherwise; saying it is not
         // makes Android take the metering of the network underneath
@@ -806,7 +859,7 @@ class ShroudlyVpnService : VpnService() {
         val hev = try { Tun2Socks.TProxyGetStats() } catch (_: Throwable) { null }
         val tx = hev?.getOrNull(0) ?: -1L
         val rx = hev?.getOrNull(2) ?: -1L
-        if (hevWatch.stuck(now, tx, rx)) {
+        if (hevWatch.stuck(now, tx, rx, EngineNative.udpInOrNone(), EngineNative.connsInOrNone())) {
             tunnelTrouble("takes apps' packets and gives nothing back")
             return
         }
@@ -819,7 +872,9 @@ class ShroudlyVpnService : VpnService() {
         // callback asks for a check then). A locked phone with its network
         // off was checked every 10 seconds, for nothing.
         if (underlyingId != null && pathWatch.due(now)) {
-            val why = if (pathWatch.stalled(now)) "apps get nothing back" else "routine"
+            // Only the two-minute one is "routine" (said rarely, see onPath):
+            // one asked for after a new engine, tunnel or network has a reason.
+            val why = if (pathWatch.stalled(now)) "apps get nothing back" else if (pathWatch.askedNow(now)) "asked" else "routine"
             pathWatch.started(now)
             check {
                 val t0 = SystemClock.uptimeMillis()
@@ -848,7 +903,13 @@ class ShroudlyVpnService : VpnService() {
         val now = SystemClock.uptimeMillis()
         when (pathWatch.result(now, reached != null, networkWorks)) {
             PathWatch.Verdict.HEALTHY -> {
-                log("Path check ($why): through the engine to $reached in ${ms}ms")
+                // Every two minutes, "all fine" was most of the log: a
+                // routine one is said once after a start, when slow, and then
+                // once in half an hour (PathWatch.sayRoutine).
+                if (why != "routine" || PathWatch.sayRoutine(routineSaidAt, now, ms)) {
+                    log("Path check ($why): through the engine to $reached in ${ms}ms")
+                    if (why == "routine") routineSaidAt = now
+                }
                 if (Protection.national != null) { Protection.national(null); log("The rest of the world answers again") }
                 // Under lockdown, a retry of everything planned because the
                 // way through was broken: not wanted now that it works, with
@@ -906,7 +967,8 @@ class ShroudlyVpnService : VpnService() {
         val net = try { underlying(cm)?.first } catch (_: Exception) { null }
         Thread({
             try {
-                val found = NationalNet.answers(net)
+                val zone = java.util.TimeZone.getDefault().id
+                val found = NationalNet.answers(net)?.takeIf { NationalNet.plausible(it.first, zone) }
                 val cc = found?.first
                 if (cc != null) AppSettings.setHomeCountry(this, cc)
                 if (cc != Protection.national) {
@@ -1166,6 +1228,15 @@ class ShroudlyVpnService : VpnService() {
         }
         val old = tun
         stopTunnel()
+        // hev did not stop: it holds the old interface, and a new tunnel would
+        // wait on it for ever, this service's work thread with it (a Stop
+        // pressed then never came: protection stuck at "stopping", a
+        // Turkcell report while Wi-Fi and mobile data kept trading places).
+        if (restartProcess) {
+            try { fresh.close() } catch (_: Exception) {}
+            wedged("the tunnel did not stop when the VPN interface was renewed")
+            return
+        }
         // A new tunnel ends every connection apps had: none is kept anywhere.
         kept.clear()
         tun = fresh
@@ -1238,11 +1309,13 @@ class ShroudlyVpnService : VpnService() {
             is EngineEvent.Ready -> {
                 log("Engine listening on 127.0.0.1:${ev.port} (${ev.techniques} techniques)")
                 // The names the user blocked in the Connections list.
-                Conns.commands(this).takeIf { it.isNotEmpty() }?.let { engine?.send(it.joinToString("\n")); log("Connections: ${it.size - 1} names you blocked are refused") }
-                val cmds = learnedRaw.commands(System.currentTimeMillis()) + learned.commands(System.currentTimeMillis())
+                Conns.commands(this).takeIf { it.isNotEmpty() }?.let { engine?.send(it.joinToString("\n")); log(Conns.summary(this)) }
+                // What a server cannot take first: a technique of that kind is then not restored for it.
+                val cmds = Avoids.commands(getSharedPreferences(PREFS, MODE_PRIVATE).getString(Avoids.KEY, null), System.currentTimeMillis()) +
+                    learnedRaw.commands(System.currentTimeMillis()) + learned.commands(System.currentTimeMillis())
                 if (cmds.isNotEmpty()) {
                     engine?.send(cmds.joinToString("\n"))
-                    log("Techniques remembered for ${cmds.size} sites restored")
+                    log("Techniques remembered for ${cmds.count { it.startsWith("LEARN") }} sites restored")
                 }
                 // A session that has been up a while has earned a fresh restart budget.
                 later {
@@ -1259,18 +1332,20 @@ class ShroudlyVpnService : VpnService() {
                 Protection.stats = ev
                 Protection.changed()
             }
-            is EngineEvent.Conn, is EngineEvent.ConnsEnd -> connsCollector.take(ev)
+            is EngineEvent.Conn, is EngineEvent.Ad, is EngineEvent.ConnsEnd -> connsCollector.take(ev)
             is EngineEvent.Host -> onHost(ev)
-            is EngineEvent.NetDns -> logSite(NetDnsText.line(ev))
+            is EngineEvent.NetDns -> if (NetDnsText.once(ev, SystemClock.elapsedRealtime())) logSite(NetDnsText.line(ev))
+            is EngineEvent.Refused -> onRefused(ev)
             is EngineEvent.UdpFull -> log(ev.line)
             is EngineEvent.Error -> log("engine: ${ev.message}")
-            is EngineEvent.Upstream -> if (!ev.ok) ownServer.down(OwnServer.whyCode(ev.why))
+            is EngineEvent.Upstream -> if (!ev.ok) ownServer.down(OwnServer.localIf(OwnServer.whyCode(ev.why), AppSettings.ownServer(this)?.host))
             // Nothing was listening: Tor is started for the next connection.
             // Tor only once the user said yes (issue #77); until then asked.
-            is EngineEvent.Fallback -> if (!ev.ok) { if (ev.why != "file unusable") { if (TorRoute.approved(this)) torRoute.need() else TorAsk.ask(this, ev.host) } } else {
+            is EngineEvent.Fallback -> if (!ev.ok) { if (ev.why != "file unusable" && active) { if (TorRoute.approved(this)) { if (ev.host.isNotEmpty() && TorRoute.state != "ready" && torNeedTold.add(ev.host)) ShroudlyVpnService.logSite("${ev.host}: no technique got through; the last way out (Tor) is needed for it"); torRoute.need() } else TorAsk.ask(this, ev.host) } } else {
                 logSite("${ev.host}: no technique got through; opened through the last way out (Tor)")
                 if (ev.host.isNotEmpty()) TorNotice.used(this, ev.host)
             }
+            is EngineEvent.Direct -> if (ev.host.isNotEmpty()) logSite(ev.line)
             is EngineEvent.DnsAround -> DnsNotice.around(this)
             is EngineEvent.Adblock -> when {
                 ev.error != null -> log("Ad blocking: the list could not be used (${ev.error})")
@@ -1283,6 +1358,12 @@ class ShroudlyVpnService : VpnService() {
 
     private fun onHost(ev: EngineEvent.Host) {
         if (ev.raw && (ev.kind == "blocked" || ev.kind == "unreachable")) { onRaw(ev); return }
+        // The lite APK, a site the full one would take to Tor (LiteOffer).
+        if (!ev.raw && LiteOffer.lite && LiteOffer.wants(ev.kind, ev.alert, ev.stage)) LiteOffer.offer(this, ev.host)
+        // The full APK with the last way out turned off: asked again, now and then (TorAsk.askAgain),
+        // for every site Tor would have carried: still blocked after every technique, cut each
+        // time, or with no address that answers (YouTube and Instagram in Iran are the last kind).
+        if (!ev.raw && !LiteOffer.lite && LiteOffer.wants(ev.kind, ev.alert, ev.stage)) TorAsk.askAgain(this, ev.host)
         val key = "${ev.kind} ${ev.host}"
         val first = synchronized(told) {
             if (told.size > 400) told.clear()
@@ -1311,21 +1392,57 @@ class ShroudlyVpnService : VpnService() {
         }
     }
 
+    /* An app turned down what a technique produced: its next connection uses
+     * another kind; that, and the kinds to leave out, kept across restarts. */
+    private fun onRefused(ev: EngineEvent.Refused) {
+        if (ev.host.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        if (ev.next.isNotEmpty()) synchronized(learned) {
+            learned.remember(ev.host, ev.next, now)
+            prefs.edit().putString("learned", learned.encode()).apply()
+        }
+        if (ev.avoid > 0) prefs.edit().putString(Avoids.KEY, Avoids.remember(prefs.getString(Avoids.KEY, null), ev.host, ev.avoid, now)).apply()
+        logSite { "${ev.host}: the app refused the certificate the server sent after ${ev.strategy}; the next connection uses ${ev.next.ifEmpty { "no technique" }} instead" }
+    }
+
     /* A connection that is not TLS or HTTP that no technique got through, or
      * whose address does not answer at all (see RawApps.kt): a line in the
      * log, and, for an app that can be named, one notice per network. */
     private fun onRaw(ev: EngineEvent.Host) {
         val kind = if (ev.kind == "blocked") RawWatch.Kind.BLOCKED else RawWatch.Kind.UNREACHABLE
         when (val o = rawWatch.onEvent(kind, ev.host, ev.port, ev.attempts, System.currentTimeMillis(), ev.stage, ev.note)) {
-            is RawWatch.Outcome.Log -> logSite { o.line }
+            is RawWatch.Outcome.Log -> { o.before?.let { b -> logSite { b } }; logSite { o.line } }
             is RawWatch.Outcome.Tell -> {
-                val n = o.notice
+                val n0 = o.notice
+                // An app no list knows: named by its servers in the question.
+                val n = if (n0.app.isNotEmpty()) n0 else n0.copy(app = text(R.string.torAskUnknownApp, "addr" to n0.addrs.first().substringBeforeLast(':').trim('[', ']')))
                 val addrs = n.addrs.joinToString(", ")
-                log(
-                    if (n.kind == RawWatch.Kind.UNREACHABLE) "${n.app} cannot reach its servers ($addrs): the network blocks those addresses themselves; only the app's own proxy setting or a VPN gets around that"
-                    else "${n.app}: the network stops its connections ($addrs) and no technique got through; only the app's own proxy setting or a VPN gets around that",
-                )
-                notifyRaw(if (n.kind == RawWatch.Kind.UNREACHABLE) R.string.autoRawUnreachable else R.string.autoRawBlocked, n.app)
+                val what = if (n.kind == RawWatch.Kind.UNREACHABLE) "${if (n0.app.isEmpty()) "An app" else n.app} cannot reach its servers ($addrs): the network blocks those addresses themselves"
+                    else "${n.app}: the network stops its connections ($addrs) and no technique got through"
+                // The last way out takes these connections too (the engine's
+                // via_fallback, by address): "use the app's own proxy" was
+                // wrong advice there. An Iran Telegram report: that notice,
+                // and a Tor question naming a bare IPv6 address, so Tor was
+                // never allowed and Telegram stayed shut.
+                when (TorAsk.forRaw(LiteOffer.lite, TorRoute.bundled(this), TorRoute.enabled(this), TorRoute.approved(this),
+                    AppSettings.ownServerTyped(this).isNotBlank() || Protection.ownServerDown != null)) {
+                    TorAsk.Raw.CARRIES -> logSite { "$what; they go through the last way out (Tor)" }
+                    TorAsk.Raw.ASKS -> {
+                        log("$what; the last way out (Tor) gets around that once allowed, asked on the main screen")
+                        TorAsk.askApp(this, n.app)
+                    }
+                    TorAsk.Raw.OFF -> {
+                        if (TorAsk.askAgain(this, n.app, app = true)) log("$what; the last way out (Tor), turned off, would get around that: asked again on the main screen")
+                        else { log("$what; only the app's own proxy setting, a VPN, or the last way out (Tor, Settings) gets around that"); notifyRaw(if (n.kind == RawWatch.Kind.UNREACHABLE) R.string.autoRawUnreachable else R.string.autoRawBlocked, n.app) }
+                    }
+                    TorAsk.Raw.NONE -> {
+                        log("$what; only the app's own proxy setting or a VPN gets around that")
+                        // The lite APK: the full one's Tor would carry the app's
+                        // connections too (LiteOffer); its card says so instead.
+                        if (!(LiteOffer.lite && LiteOffer.offer(this, n.app))) notifyRaw(if (n.kind == RawWatch.Kind.UNREACHABLE) R.string.autoRawUnreachable else R.string.autoRawBlocked, n.app)
+                    }
+                }
             }
             RawWatch.Outcome.Nothing -> {}
         }
@@ -1336,7 +1453,7 @@ class ShroudlyVpnService : VpnService() {
             channels(this)
             val text = text(res, "app" to app)
             val n = Notification.Builder(this, ALERT_CHANNEL)
-                .setSmallIcon(R.drawable.ic_shield)
+                .setSmallIcon(R.drawable.ic_stat_logo)
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text))
@@ -1371,6 +1488,11 @@ class ShroudlyVpnService : VpnService() {
         engine = null
         healthEpoch++
         log("Engine $why")
+        // The engine ending or reaching nothing on a network that works is
+        // Shroudly's own trouble, even when a restart then puts it right:
+        // "Something not working?" is offered for a day (Report.offered). A
+        // restart for a setting the user changed is not.
+        if (countsAsCrash || freshPort) Report.fault(this)
         doh?.socksPort = 0
         Protection.socksPort = 0
         Protection.socksAuth = null
@@ -1389,6 +1511,7 @@ class ShroudlyVpnService : VpnService() {
      * no new engine can start beside it. Protection ends (apps connect
      * directly) and the process with it (finish). */
     private fun wedged(detail: String) {
+        Report.fault(this)
         log("Stuck: $detail")
         restartProcess = true
         if (alwaysOn()) {
@@ -1415,6 +1538,7 @@ class ShroudlyVpnService : VpnService() {
      * protection holds on instead, tries everything again with a growing
      * pause, and says honestly that apps are offline until it works. */
     private fun giveUp(res: Int, detail: String, cause: LockdownHold.Cause = LockdownHold.Cause.OTHER) {
+        Report.fault(this)
         if (lockdown()) {
             holdOn(detail, cause)
             return
@@ -1557,7 +1681,7 @@ class ShroudlyVpnService : VpnService() {
     // "Help people in censored countries" while on, charging, on Wi-Fi.
     private val snowflake by lazy { Snowflake(this) { log(it) } }
     // The last way out (TorRoute): Tor, for sites nothing else opened.
-    private val torRoute by lazy { TorRoute(this, { log(it) }) { Protection.changed() } }
+    private val torRoute by lazy { TorRoute.shared(this) }
     private val connsCollector = Conns.Collector()
 
     /* hev stopped and its thread waited for, then the VPN interface closed:
@@ -1569,10 +1693,13 @@ class ShroudlyVpnService : VpnService() {
     }
 
     private fun teardown() {
+        // What went through, for a report sent after this stop (Conns.lastSession).
+        engine?.let { e -> Conns.keepLastSession({ e.send("CONNS") }) }
         val wasActive = active
         active = false
         snowflake.stop()
-        torRoute.stop()
+        // Kept a few minutes: a quick Stop and Start goes on with it.
+        torRoute.linger()
         TorNotice.reset()
         TorAsk.reset()
         OnlineCount.stop(leave = false)
@@ -1612,20 +1739,20 @@ class ShroudlyVpnService : VpnService() {
     private fun goForeground(starting: Boolean): String? {
         channels(this)
         val stopIntent = PendingIntent.getService(
-            this, 1, Intent(this, ShroudlyVpnService::class.java).setAction(ACTION_STOP),
+            this, 1, Intent(this, ShroudlyVpnService::class.java).setAction(ACTION_STOP).putExtra(EXTRA_BY, "the notification"),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         // Under lockdown, Stop asks first in the window (with Shroudly off
         // there apps have no internet at all, MainActivity.confirmStop).
         val stop = if (Protection.lockdown) PendingIntent.getActivity(
-            this, 4, Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_CONFIRM_STOP, true)
+            this, 4, Intent(this, HomeActivity::class.java).putExtra(MainActivity.EXTRA_CONFIRM_STOP, true)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         ) else stopIntent
         // What it covers (Coverage): every app, only some, all but some.
         val text = if (starting) getString(R.string.starting) else Coverage.text(this)
         val n = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_shield)
+            .setSmallIcon(R.drawable.ic_stat_logo)
             .setContentTitle(getString(if (starting) R.string.starting else R.string.protected_))
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
@@ -1665,7 +1792,7 @@ class ShroudlyVpnService : VpnService() {
             channels(this)
             val text = getString(errorRes)
             val n = Notification.Builder(this, ALERT_CHANNEL)
-                .setSmallIcon(R.drawable.ic_shield)
+                .setSmallIcon(R.drawable.ic_stat_logo)
                 .setContentTitle(getString(title))
                 .setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text))

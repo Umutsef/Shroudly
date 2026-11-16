@@ -170,8 +170,24 @@ function get(url, o = {}) {
       && DA.oldestStart('', { platform: 'win32' }) === null, "Windows: the oldest of PowerShell's start times; none: unknown");
     // The real lookup, on this machine's own processes.
     if (process.platform === 'win32') {
+      // PowerShell started once first: its very first start can take longer
+      // than the lookup's 15 s on a cold runner (Windows on ARM), which is
+      // the runner's start, not what is being tested here.
+      await new Promise((resolve) => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '1'],
+        { windowsHide: true, timeout: 90000 }, () => resolve()));
       const at = await DA.startedAt({ exe: path.basename(process.execPath) });
-      t.ok(typeof at === 'number' && at <= Date.now() && at > Date.now() - 7 * 86400000, `Windows: when a running program started, from PowerShell (${at && new Date(at).toISOString()})`);
+      const fine = typeof at === 'number' && at <= Date.now() && at > Date.now() - 7 * 86400000;
+      // Nothing back: is it this code, or PowerShell on this runner reading
+      // no process's start at all (seen on Windows on ARM runners)? Asked
+      // for this very process by its id: if that is empty too, the runner.
+      let runnerBlind = false;
+      if (!fine) {
+        const own = await new Promise((resolve) => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+          `try { (Get-Process -Id ${process.pid}).StartTime.ToUniversalTime().ToString('o') } catch {}`], { windowsHide: true, timeout: 60000 }, (e, o) => resolve(e ? '' : String(o).trim())));
+        runnerBlind = !own;
+      }
+      if (runnerBlind) console.log('  --  PowerShell on this runner reads no process\'s start time, not even its own caller\'s: not this code\'s doing, skipped');
+      else t.ok(fine, `Windows: when a running program started, from PowerShell (${at && new Date(at).toISOString()})`);
     } else {
       // (Minimal containers have no ps; the lookup is for macOS, where it always is.)
       const out = await new Promise((r) => require('child_process').execFile('ps', ['-o', 'etime=', '-p', String(process.pid)], (e, o) => r(e ? null : String(o || ''))));
@@ -208,6 +224,21 @@ function get(url, o = {}) {
       const p = await get(mod.full.url, { agent });
       t.ok(crypto.createHash('sha256').update(p.body).digest('hex') === mod.full.package_sha256, `[${mode}] package arrives intact (SHA-256 matches)`);
     }
+  }
+  {
+    // The updater's requests one after another reuse kept connections: no
+    // new connection and TLS handshake through the engine for each of them.
+    engineOn = true;
+    let opened = 0;
+    const real = relay._connect.bind(relay);
+    relay._connect = (h) => { opened++; return real(h); };
+    const url = `${base}/distributions/app/manifests/latest?channel=stable&platform=${plat}&arch=${arch}`;
+    for (let i = 0; i < 4; i++) {
+      const r = await get(url, { headers: { 'user-agent': 'Discord-Updater/1' } });
+      if (r.status !== 200) t.ok(false, `kept connections: request ${i + 1} answered ${r.status}`);
+    }
+    relay._connect = real;
+    t.ok(opened === 1, `four requests in a row, one connection to Discord (${opened})`);
   }
   {
     // The engine restarting after a crash and not back within the wait: the

@@ -109,6 +109,10 @@ typedef struct {
 
 static cache_entry g_cache[CACHE_SETS][CACHE_WAYS];
 static mutex_t     g_cache_mx;
+/* Names encrypted DNS said do not exist: see doh_no_such_name. */
+#define NX_SLOTS 64
+#define NX_TTL_MS (10 * 60 * 1000)
+static struct { char name[256]; uint64_t t; } g_nx[NX_SLOTS];
 static int         g_init = 0;
 static uint64_t    g_plain_dead_until = 0;   /* under g_cache_mx */
 static uint64_t    g_fwd_dead_until = 0;     /* under g_cache_mx (fwd_heard) */
@@ -125,6 +129,7 @@ void doh_clear_cache(void) {
   memset(g_cache, 0, sizeof(g_cache));
   g_plain_dead_until = 0;   /* a new network: its resolvers are asked again */
   g_fwd_dead_until = 0;     /* and encrypted DNS waited for again */
+  memset(g_nx, 0, sizeof(g_nx));
   mutex_unlock(&g_cache_mx);
 }
 
@@ -261,8 +266,69 @@ static uint32_t g_block_ips[MAX_BLOCK_IPS] = {
 };
 static int g_block_n = 1;
 
+/* The same for IPv6. Iran's answers blocked names with 2001:4188:2:600:
+ * 10:10:34:34 to :36 (10.10.34.34 to .36 written in the address) as well:
+ * on a network with IPv6, where encrypted DNS is blocked and plain DNS is
+ * the fallback, those were taken for the site's own address, and connections
+ * went to the block page instead of the techniques or Tor (MCI's mobile data,
+ * "no app opens"). */
+#define MAX_BLOCK_IPS6 64
+static uint8_t g_block6[MAX_BLOCK_IPS6][16] = {
+  { 0x20,0x01,0x41,0x88,0x00,0x02,0x06,0x00,0x00,0x10,0x00,0x10,0x00,0x34,0x00,0x34 },
+  { 0x20,0x01,0x41,0x88,0x00,0x02,0x06,0x00,0x00,0x10,0x00,0x10,0x00,0x34,0x00,0x35 },
+  { 0x20,0x01,0x41,0x88,0x00,0x02,0x06,0x00,0x00,0x10,0x00,0x10,0x00,0x34,0x00,0x36 },
+};
+static int g_block6_n = 3;
+
+static int is_blockpage_v6(const uint8_t a[16]) {
+  for (int i = 0; i < g_block6_n; i++) if (memcmp(g_block6[i], a, 16) == 0) return 1;
+  /* An IPv4 block page written as IPv6 (::ffff:a.b.c.d, 64:ff9b::a.b.c.d). */
+  static const uint8_t mapped[12] = { 0,0,0,0,0,0,0,0,0,0,0xff,0xff };
+  static const uint8_t nat64[12] = { 0,0x64,0xff,0x9b,0,0,0,0,0,0,0,0 };
+  if (memcmp(a, mapped, 12) == 0 || memcmp(a, nat64, 12) == 0) {
+    uint32_t ip = ((uint32_t)a[12] << 24) | ((uint32_t)a[13] << 16) | ((uint32_t)a[14] << 8) | a[15];
+    for (int i = 0; i < g_block_n; i++) if (g_block_ips[i] == ip) return 1;
+  }
+  return 0;
+}
+
+/* Addresses no public name has: unspecified, link-local (fe80::/10),
+ * unique-local (fc00::/7, a LAN's), multicast, and an IPv4 bogon written as
+ * IPv6 (::ffff:10.0.0.1). A censor answers with them, as with IPv4 bogons.
+ * Loopback (::1, ::ffff:127.x) is not among them: no censor answers with it,
+ * and it is where a developer's own override and the tests point a name. */
+static int is_bogon_v6(const uint8_t a[16]) {
+  static const uint8_t zero[16] = { 0 };
+  if (memcmp(a, zero, 16) == 0) return 1;
+  if (a[0] == 0xfe && (a[1] & 0xc0) == 0x80) return 1;
+  if ((a[0] & 0xfe) == 0xfc) return 1;
+  if (a[0] == 0xff) return 1;
+  static const uint8_t mapped[12] = { 0,0,0,0,0,0,0,0,0,0,0xff,0xff };
+  if (memcmp(a, mapped, 12) == 0) {
+    uint32_t ip = ((uint32_t)a[12] << 24) | ((uint32_t)a[13] << 16) | ((uint32_t)a[14] << 8) | a[15];
+    return (ip >> 24) != 127 && is_bogon_v4(ip);
+  }
+  return 0;
+}
+
+/* A LAN's own IPv6 (link-local, unique-local): bogons, but a real answer for
+ * a name only the local network knows. */
+static int is_private_v6(const uint8_t a[16]) {
+  return (a[0] == 0xfe && (a[1] & 0xc0) == 0x80) || (a[0] & 0xfe) == 0xfc;
+}
+
+int doh_ipv6_is_blockpage(const uint8_t a[16]) {
+  return is_blockpage_v6(a);
+}
+
 void doh_add_block_ip(const char *ip) {
   struct in_addr a;
+  struct in6_addr a6;
+  if (inet_pton(AF_INET6, ip, &a6) == 1) {
+    for (int i = 0; i < g_block6_n; i++) if (memcmp(g_block6[i], &a6, 16) == 0) return;
+    if (g_block6_n < MAX_BLOCK_IPS6) memcpy(g_block6[g_block6_n++], &a6, 16);
+    return;
+  }
   if (inet_pton(AF_INET, ip, &a) != 1) return;
   uint32_t h = ntohl(a.s_addr);
   for (int i = 0; i < g_block_n; i++) if (g_block_ips[i] == h) return;
@@ -293,6 +359,10 @@ int doh_addr_v4_is_block(uint32_t ip /*host order*/) {
 
 /* True if a resolved address is a censorship answer (block page or bogon). */
 int doh_addr_is_block(const struct sockaddr_storage *sa) {
+  if (sa->ss_family == AF_INET6) {
+    const uint8_t *a = (const uint8_t *)&((const struct sockaddr_in6 *)sa)->sin6_addr;
+    return is_bogon_v6(a) || is_blockpage_v6(a);
+  }
   if (sa->ss_family != AF_INET) return 0;
   uint32_t ip = ntohl(((const struct sockaddr_in *)sa)->sin_addr.s_addr);
   return is_bogon_v4(ip) || is_blockpage_v4(ip);
@@ -306,6 +376,10 @@ int doh_addr_is_block(const struct sockaddr_storage *sa) {
  * page pointing a public name at the LAN (DNS rebinding). */
 static int sys_answer_refused(const struct sockaddr_storage *sa, int trusted) {
   if (!trusted) return doh_addr_is_block(sa);
+  if (sa->ss_family == AF_INET6) {
+    const uint8_t *a = (const uint8_t *)&((const struct sockaddr_in6 *)sa)->sin6_addr;
+    return is_blockpage_v6(a) || (is_bogon_v6(a) && !is_private_v6(a));
+  }
   if (sa->ss_family != AF_INET) return 0;
   uint32_t ip = ntohl(((const struct sockaddr_in *)sa)->sin_addr.s_addr);
   return is_blockpage_v4(ip) || (is_bogon_v4(ip) && !is_private_v4(ip));
@@ -323,6 +397,37 @@ void doh_set_local(const char *ip, int port) {
 static _Atomic int g_strict = 0;
 void doh_set_strict(int on) { atomic_store(&g_strict, on ? 1 : 0); }
 int doh_strict(void) { return atomic_load(&g_strict) && g_fwd_port; }
+
+/* Names encrypted DNS said do not exist (NXDOMAIN), for a while. Nobody on
+ * the path can forge that answer, so the last way out has nothing to add for
+ * such a name: Tor would only be started for it (a phone maker's telemetry
+ * name, retired a while ago, started Tor at every Start on OPPO phones). The
+ * plaintext resolvers' "no such name" is not kept: that is what an injector
+ * forges to make a site vanish. */
+
+static void nx_put(const char *name) {
+  if (!name || strlen(name) >= sizeof(g_nx[0].name)) return;
+  mutex_lock(&g_cache_mx);
+  int slot = 0;
+  for (int i = 0; i < NX_SLOTS; i++) {
+    if (g_nx[i].name[0] && strcmp(g_nx[i].name, name) == 0) { slot = i; break; }
+    if (g_nx[i].t < g_nx[slot].t) slot = i;
+  }
+  snprintf(g_nx[slot].name, sizeof(g_nx[slot].name), "%s", name);
+  g_nx[slot].t = now_ms();
+  mutex_unlock(&g_cache_mx);
+}
+
+int doh_no_such_name(const char *name) {
+  if (!name || !name[0]) return 0;
+  int yes = 0;
+  uint64_t now = now_ms();
+  mutex_lock(&g_cache_mx);
+  for (int i = 0; i < NX_SLOTS; i++)
+    if (g_nx[i].name[0] && strcmp(g_nx[i].name, name) == 0) { yes = now - g_nx[i].t < NX_TTL_MS; break; }
+  mutex_unlock(&g_cache_mx);
+  return yes;
+}
 
 int doh_local_addr(struct sockaddr_in *out) {
   if (!g_fwd_port) return -1;
@@ -536,7 +641,12 @@ static int dns_parse(const uint8_t *r, int len, int want6,
         if (is_private_v4(ip) && !is_blockpage_v4(ip)) private = 1;
         continue;
       }
-    } else if (!(want6 && rdlen == 16)) {
+    } else if (want6 && rdlen == 16) {
+      if (is_bogon_v6(r + rdata) || is_blockpage_v6(r + rdata)) {
+        if (is_private_v6(r + rdata)) private = 1;
+        continue;
+      }
+    } else {
       continue;
     }
     int dup = 0;
@@ -838,6 +948,7 @@ static int resolve_fresh(const char *name, uint16_t port, int want6,
      * signatures: a forged answer passed as good, and each of them saw the
      * name, after a 4 s wait. */
     if (fr == DNS_NODATA || fr == DNS_PRIVATE || fr == DNS_SERVFAIL) { udp_ask_close(&fwd); return -1; }
+    if (fr == DNS_NXDOMAIN) nx_put(name);
     if (fr == -1 && !dead) {
       /* No answer in time. The forwarder goes on looking, and may only now
        * be getting its routes back (a network that has just returned, its

@@ -18,9 +18,11 @@
  *   GET  /v1/online                     -> {"online": n, "interval": s}
  *   GET  /dl                            -> 302 to the latest release page
  *   GET  /dl/<key>                      -> 302 to that installer in the latest release
+ *   GET  /dl/<key>?mirror               -> 302 to /dl/<its file name>: served from here
  *                                          (HEAD too: download managers and link checkers ask first)
  *   GET  /dl/<latest release file name> -> that file itself, served from here: the
  *                                          updater's mirror where github.com is blocked
+ *   GET  /v1/bridges                    -> Tor bridges for the asker's country (see below)
  *
  *   node server.js [--port 8787] [--state /var/lib/shroudly-stats/seen.json]
  */
@@ -121,26 +123,76 @@ async function cached(name, produce) {
 }
 
 async function head(url) {
-  return fetch(url, { method: 'HEAD', redirect: 'manual', headers: { 'user-agent': 'shroudly-dl' }, signal: AbortSignal.timeout(10000) });
+  return fetch(url, { method: 'HEAD', redirect: 'manual', headers: { 'user-agent': 'shroudly-dl' }, signal: AbortSignal.timeout(6000) });
 }
 
+/* The newest release's tag, from github.com's redirect, else GitHub's API;
+ * while neither answers, the last one known (a release is not taken back),
+ * so the links keep naming the right files. It is kept next to the state
+ * file, for a restart while GitHub is down, and a failed ask is not repeated
+ * for a minute, so a visitor does not wait on it each time. */
+const TAG_FILE = STATE ? path.join(path.dirname(STATE), 'latest-tag.txt') : '';
+let lastTag = null;
+try { if (TAG_FILE) lastTag = (fs.readFileSync(TAG_FILE, 'utf8').trim().match(/^v?\d+\.\d+\.\d+[\w.-]*$/) || [null])[0]; } catch { /* none yet */ }
+let tagFailedUntil = 0;
 async function latestTag() {
-  const tag = await cached('latest-tag', async () => {
-    const m = ((await head(RELEASES_LATEST)).headers.get('location') || '').match(TAG_RE);
-    return m ? m[1] : null;
-  });
+  let tag = null;
+  if (lastTag && Date.now() < tagFailedUntil) return { tag: lastTag, version: lastTag.replace(/^v/, '') };
+  try {
+    tag = await cached('latest-tag', async () => {
+      try {
+        const m = ((await head(RELEASES_LATEST)).headers.get('location') || '').match(TAG_RE);
+        if (m) return m[1];
+      } catch { /* the API next */ }
+      const r = await fetch(`${API}/releases/latest`, {
+        headers: { 'user-agent': 'shroudly-dl', accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(5000) });
+      const t = r.ok ? (await r.json()).tag_name : null;
+      return typeof t === 'string' && /^v?\d+\.\d+\.\d+/.test(t) ? t : null;
+    });
+  } catch { /* neither answered */ }
+  if (tag && tag !== lastTag) {
+    lastTag = tag;
+    if (TAG_FILE) fs.writeFile(TAG_FILE, `${tag}\n`, () => {});
+  }
+  if (!tag) tagFailedUntil = Date.now() + 60000;
+  tag = tag || lastTag;
   return tag ? { tag, version: tag.replace(/^v/, '') } : null;
 }
 
-async function assetExists(url) {
-  // github.com answers an existing asset with a redirect to its storage.
-  return (await cached(`asset:${url}`, async () => {
-    const s = (await head(url)).status;
-    return s === 302 || s === 200 ? '1' : null;
-  })) === '1';
+/* What github.com says about an asset: 'ok' (a redirect to its storage),
+ * 'down' (a 5xx: GitHub's download address failing for everyone, as on
+ * 2026-11-08, while the file is there), or null. Only 'ok' is kept. */
+async function assetState(url) {
+  let state = null;
+  try {
+    return await cached(`asset:${url}`, async () => {
+      const s = (await head(url)).status;
+      if (s >= 500) state = 'down';
+      return s === 302 || s === 200 ? 'ok' : null;
+    }) || state;
+  } catch { return 'down'; }   // no answer in time: the same
 }
 
-async function download(pathname) {
+/* The same file by its asset id, through GitHub's API, which sends to the
+ * same storage: the way round github.com's download address while that
+ * fails. Only an asset of the given release, by a name already checked. */
+const API = 'https://api.github.com/repos/umutxyp/Shroudly';
+async function apiAssetUrl(tag, name) {
+  const ids = await cached(`assets:${tag}`, async () => {
+    const r = await fetch(`${API}/releases/tags/${encodeURIComponent(tag)}`, {
+      headers: { 'user-agent': 'shroudly-dl', accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return Object.fromEntries((j.assets || []).map((a) => [a.name, a.id]));
+  });
+  const id = ids && ids[name];
+  return Number.isInteger(id) ? `${API}/releases/assets/${id}` : null;
+}
+
+/* own: the file from here (the mirror below) instead of GitHub's address,
+ * as codeshare.me's download buttons ask (?mirror): GitHub is blocked on
+ * some of the networks Shroudly is for, and the visitor stays on our host. */
+async function download(pathname, own = false) {
   const key = pathname.replace(/^\/dl\/?/, '');
   if (!key) return RELEASES_LATEST;
   const file = DL_FILES[key];
@@ -148,8 +200,13 @@ async function download(pathname) {
   try {
     const latest = await latestTag();
     if (latest) {
-      const url = `${REPO}/releases/download/${latest.tag}/${file(latest.version)}`;
-      if (await assetExists(url)) return url;
+      const name = file(latest.version);
+      if (own) return `/dl/${name}`;
+      const url = `${REPO}/releases/download/${latest.tag}/${name}`;
+      const state = await assetState(url);
+      if (state === 'ok') return url;
+      // github.com's downloads failing: the file from here, by the API.
+      if (state === 'down') return `/dl/${name}`;
     }
   } catch { /* github.com unreachable: the release page is still the right answer */ }
   return RELEASES_LATEST;
@@ -184,7 +241,19 @@ async function mirror(req, res, url) {
   res.on('close', () => ctl.abort());
   let up;
   try {
-    up = await fetch(url, { method: req.method, headers: { 'user-agent': 'shroudly-dl' }, signal: ctl.signal });
+    // No answer at all from github.com counts as its 5xx.
+    up = await fetch(url, { method: req.method, headers: { 'user-agent': 'shroudly-dl' }, signal: ctl.signal })
+      .catch((e) => { if (ctl.signal.aborted) throw e; return new Response(null, { status: 502 }); });
+    // github.com's download address failing (a 5xx for every file, every
+    // repository, 2026-11-08): the same file by its asset id, through the API.
+    if (up.status >= 500) {
+      const tag = url.split('/releases/download/')[1]?.split('/')[0];
+      const alt = tag && await apiAssetUrl(decodeURIComponent(tag), name);
+      if (alt) {
+        if (up.body) up.body.cancel().catch(() => {});
+        up = await fetch(alt, { method: req.method, headers: { 'user-agent': 'shroudly-dl', accept: 'application/octet-stream' }, signal: ctl.signal });
+      }
+    }
   } finally {
     clearTimeout(slow);
   }
@@ -216,6 +285,61 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+// ── Tor bridges for the asker's country ─────────────────────────────────────
+// The bridges Tor's bundle ships (Snowflake, meek, seven obfs4) are all
+// blocked in Russia, and Tor never got through there. The Tor Project hands
+// out others by country (its "Moat" circumvention settings: WebTunnel, obfs4
+// that are in no bundle, Snowflake tuned to the country), which is how Tor
+// Browser connects there; but bridges.torproject.org itself is blocked where
+// they are needed. So the apps ask here: the country is Cloudflare's for the
+// connection (CF-IPCountry), nothing about the asker is kept, and the answer
+// is cached an hour per country. A country the Tor Project has nothing
+// particular for (or none known) gets its defaults: WebTunnel and obfs4 that
+// are in no bundle either, the same for everyone.
+const MOAT = 'https://bridges.torproject.org/moat/circumvention/settings';
+const MOAT_DEFAULTS = 'https://bridges.torproject.org/moat/circumvention/defaults';
+const BRIDGE_KINDS = ['webtunnel', 'obfs4', 'snowflake', 'meek'];
+const BRIDGES_MS = 60 * 60 * 1000;
+const bridgeCache = new Map();   // country -> { at, bridges }
+
+// The bridge lines of a Moat answer, by transport.
+function moatBridges(j) {
+  const out = {};
+  // Those in no bundle first: the bundle's are the first a censor blocks.
+  const settings = (Array.isArray(j && j.settings) ? j.settings : []).slice()
+    .sort((a, b) => Number((a && a.bridges && a.bridges.source) === 'builtin') - Number((b && b.bridges && b.bridges.source) === 'builtin'));
+  for (const s of settings) {
+    const b = s && s.bridges;
+    if (!b || !BRIDGE_KINDS.includes(b.type) || !Array.isArray(b.bridge_strings)) continue;
+    const lines = b.bridge_strings.filter((l) => typeof l === 'string' && l.startsWith(`${b.type} `) && l.length < 2000 && !/[\r\n]/.test(l));
+    if (lines.length) out[b.type] = [...new Set([...(out[b.type] || []), ...lines])].slice(0, 8);
+  }
+  return out;
+}
+
+async function moat(url, body) {
+  const r = await fetch(url, {
+    method: 'POST', headers: { 'content-type': 'application/vnd.api+json' },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(10000),
+  });
+  return r.ok ? moatBridges(await r.json()) : null;
+}
+
+async function bridgesFor(cc) {
+  const key = cc || 'defaults';
+  const hit = bridgeCache.get(key);
+  if (hit && Date.now() - hit.at < BRIDGES_MS) return hit.bridges;
+  let bridges = hit ? hit.bridges : {};
+  try {
+    let got = cc ? await moat(MOAT, { country: cc.toLowerCase(), transports: BRIDGE_KINDS }) : null;
+    if (!got || !Object.keys(got).length) got = await moat(MOAT_DEFAULTS, { transports: BRIDGE_KINDS });
+    if (got) bridges = got;
+  } catch { /* the last answer, or none */ }
+  bridgeCache.set(key, { at: Date.now(), bridges });
+  if (bridgeCache.size > 300) bridgeCache.delete(bridgeCache.keys().next().value);
+  return bridges;
+}
+
 function readId(req) {
   return new Promise((resolve) => {
     let body = '';
@@ -227,13 +351,13 @@ function readId(req) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const { pathname } = new URL(req.url, 'http://x');
+  const { pathname, searchParams } = new URL(req.url, 'http://x');
   const route = `${req.method} ${pathname}`;
   try {
     if ((req.method === 'GET' || req.method === 'HEAD') && (pathname === '/dl' || pathname.startsWith('/dl/'))) {
       const from = await mirrorUrl(pathname);
       if (from) { await mirror(req, res, from); return; }
-      const to = await download(pathname);
+      const to = await download(pathname, searchParams.has('mirror'));
       if (!to) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('unknown download key'); return; }
       res.writeHead(302, { location: to, 'cache-control': 'no-store' });
       res.end();
@@ -248,6 +372,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (route === 'GET /v1/online') { send(res, 200, { online: seen.size, interval: interval() }); return; }
+    if (route === 'GET /v1/bridges') {
+      const head = String(req.headers['cf-ipcountry'] || '').toUpperCase();
+      const asked = String(searchParams.get('cc') || '').toUpperCase();
+      const cc = /^[A-Z]{2}$/.test(head) && head !== 'XX' && head !== 'T1' ? head : /^[A-Z]{2}$/.test(asked) ? asked : '';
+      send(res, 200, { country: cc || null, bridges: await bridgesFor(cc) });
+      return;
+    }
     send(res, 404, { error: 'not found' });
   } catch {
     if (!res.headersSent) send(res, 500, { error: 'error' });

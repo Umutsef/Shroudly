@@ -19,6 +19,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const TorApps = require('./tor-apps');
 const SystemProxy = require('./system-proxy');
 const DohForwarder = require('./doh-forwarder');
 const CustomDnsLib = require('./custom-dns');
@@ -105,6 +106,15 @@ const CUT_SETTLE_MS = 10000;
  * failed while it did. Host -> { s: technique, t: when learned }. Sent to
  * the engine at each start with its age (see engine_restore), so one that
  * no longer works is checked and replaced, never trusted blindly. */
+/* Kinds of technique a name's server cannot take (the engine's "refused":
+ * it answered a ClientHello in two records with another certificate, #68),
+ * kept across restarts and given back before the techniques (AVOID), for as
+ * long as the engine keeps them (six hours). */
+/* "2": the ones kept before 2.6.67 were mostly the engine mistaking an app
+ * closing a connection for a refusal; they are not given back. */
+const AVOID_KEY = 'avoidTechniques2';
+const AVOID_MAX = 200;
+const AVOID_TTL_MS = 6 * 60 * 60 * 1000;
 const LEARNED_KEY = 'learnedTechniques';
 const LEARNED_MAX = 300;
 // Techniques for streams that are not TLS or HTTP (raw-*), per address: a
@@ -131,6 +141,10 @@ const DEFAULT_PORT = 10808;
 // A site no technique opened is told after this long where Tor is ready to
 // carry it (the engine tries Tor right after; see _tellBlocked).
 const BLOCKED_HOLD_MS = 8000;
+// The engine's events about one site kept for a report (_noteSiteEvent): the
+// troubles, not each technique that worked (the Connections list has those).
+const SITE_EVENT_TYPES = new Set(['blocked', 'cut', 'unreachable', 'send_failed', 'fallback', 'refused', 'dns_around', 'upstream']);
+const SITE_EVENTS_MAX = 80;
 
 // Domains routed through the proxy in "listed" mode: the list built by
 // scripts/site-list/update.js from OONI measurements and curated service
@@ -197,6 +211,9 @@ const OPENED_RECENTLY_MS = 30 * 60 * 1000;
 
 const { coreBinaryPath } = require('./core-path');
 
+/* The same "the network's own DNS" line (netdns) at most once in this long. */
+const NETDNS_AGAIN_MS = 10 * 60 * 1000;
+
 class EngineManager {
   constructor(store, hooks = {}) {
     this.store = store;
@@ -234,6 +251,8 @@ class EngineManager {
     // The ad and tracker list in use, when "Block ads and trackers" is on
     // (adblock.js keeps it): the path, or null for none yet.
     this.adblockFile = hooks.adblockFile || (() => null);
+    // The remote settings (remote-config.js) in use: {} when there are none.
+    this.remote = hooks.remote || (() => ({}));
     this._adblockChecks = [];
     // Where the file naming the user's own server goes (Settings, "Your
     // own server"; own-server.js): this user's own folder, as it holds the
@@ -425,7 +444,12 @@ class EngineManager {
       // engine leaves a connection completely untouched unless it is refused:
       // ordinary browsing is relayed as-is, at the same speed as no proxy.
       routeMode: s.routeMode === 'listed' ? 'listed' : 'all',
-      siteList: Families.expand(withDiscord(Array.isArray(s.siteList) ? s.siteList : this.siteList())),
+      // The user's own sites are routed with the automatic list, never
+      // instead of it: until 2.6.78 one edit of the box froze the list at
+      // the built-in 84 names, and a site blocked since (LinkedIn on one
+      // network: reset at every first try, "hard refresh and it opens")
+      // went straight to the network's filter, never through Shroudly.
+      siteList: Families.expand(withDiscord([...new Set([...this.siteList(), ...(Array.isArray(s.siteList) ? s.siteList : [])])])),
       port: Number(s.listenPort) || DEFAULT_PORT,
       adBlock: s.adBlock === true,
       adBlockAllow: cleanAllow(s.adBlockAllow),
@@ -456,6 +480,11 @@ class EngineManager {
     // the user's country, which a network that lets only allowed sites
     // through keeps open (national-net.js).
     for (const n of this.decoyNames()) a.push('--decoy-name', n);
+    // What the remote settings add, technique tuning only (remote-config.js
+    // engineArgs: never a server, a file, a port or an address).
+    let extra = [];
+    try { extra = require('./remote-config').engineArgs(this.remote().engineArgs); } catch {}
+    a.push(...extra);
     return a;
   }
 
@@ -465,7 +494,47 @@ class EngineManager {
     let remembered = null;
     try { remembered = this.store && this.store.get ? this.store.get('homeCountry') : null; } catch {}
     const NationalNet = require('./national-net');
-    return NationalNet.decoyNames(NationalNet.homeCountry({ remembered }));
+    const cc = NationalNet.homeCountry({ remembered });
+    // The remote settings may name this country's decoys (remote-config.js).
+    let remote = null;
+    try { remote = require('./remote-config').decoyNames(this.remote(), cc); } catch {}
+    return remote && remote.length ? remote : NationalNet.decoyNames(cc);
+  }
+
+  /* The engine's last events about sites, as it sent them, for a report
+   * (main.js): the log says each kind once per site (logGate), so a site
+   * that kept being cut or kept failing said so once, and a report sent
+   * later could not tell whether it still did. Kept in memory only, the
+   * last SITE_EVENTS_MAX, across a stop (the report after "off"). */
+  _noteSiteEvent(msg) {
+    if (!msg || !SITE_EVENT_TYPES.has(msg.type)) return;
+    if (!this.siteEvents) this.siteEvents = [];
+    const keep = {};
+    for (const k of ['host', 'strategy', 'next', 'attempts', 'family', 'note', 'why', 'stage', 'raw', 'port', 'alert', 'site_ok', 'ok']) {
+      if (msg[k] !== undefined && msg[k] !== '') keep[k] = msg[k];
+    }
+    this.siteEvents.push({ at: Date.now(), type: msg.type, ...keep });
+    if (this.siteEvents.length > SITE_EVENTS_MAX) this.siteEvents.splice(0, this.siteEvents.length - SITE_EVENTS_MAX);
+  }
+
+  /* The last way out turned off by the user (a "no" to Tor, or Settings),
+   * on a computer that has it and no own server: a site no technique opens
+   * has nothing left here, and the user is asked again now and then
+   * (main.js askTorAgain). */
+  /* What the last way out does for a connection no technique gets through
+   * (raw-apps.js): 'carries' (allowed: Tor takes it), 'asks' (not allowed
+   * yet: the user is asked), 'off' (turned off in Settings), or null (none
+   * here: no Tor in this build, the user's own server carries everything,
+   * or it could not be set up). */
+  torFor() {
+    if (!this.tor || this.ownServer()) return null;
+    if (this.store.get('torLastResort', true) === false) return 'off';
+    if (!this.active || !this._torFile) return null;
+    return this.store.get('torApproved', false) === true ? 'carries' : 'asks';
+  }
+
+  torOffByUser() {
+    return !!this.tor && this.store.get('torLastResort', true) === false && !this.ownServer();
   }
 
   /* The user's own server (Settings, "Your own server"), as stored and
@@ -557,7 +626,7 @@ class EngineManager {
       try { r = await OwnServer.test({ kind: 'socks5', host: '127.0.0.1', port: this.port, user: '' }, { trace: true, timeout: 15000 }); } catch {}
       if (!this.active || !this._upstreamFile) return;
       const ip = r && r.ok ? r.ip : null;
-      this._setAdvice({ ownServerExit: ip ? { server: this._ownServerShown || '', ip } : null });
+      this._setAdvice({ ownServerExit: ip ? { server: this._ownServerShown || '', ip, loc: (r && r.loc) || null } : null });
       this._exitTimer = setTimeout(look, ip ? EXIT_EVERY_MS : EXIT_RETRY_MS);
       if (this._exitTimer.unref) this._exitTimer.unref();
     };
@@ -570,6 +639,8 @@ class EngineManager {
    * the window until a minute and a half passes without it. */
   _onOwnServerDown(why) {
     if (!this.active || !this._upstreamFile) return;
+    // A link to a home network's address, from outside it: that is why.
+    { const p = this.ownServer(); if (p && OwnServer.localHost(p.host)) why = 'local'; }
     const server = this._ownServerShown || '';
     if (this.logGate.allow('own-server-down', `${server} ${why}`)) {
       this.log('warning', `Your own server (${server}) could not be used: ${OwnServer.WHY_TEXT[why] || why}`);
@@ -589,6 +660,41 @@ class EngineManager {
     return OwnServer.test(p, { trace: true });
   }
 
+  /* The engine asks for the last way out (fallback ok:0): Tor starts, once
+   * the user has said yes to it (issue #77); until then they are asked.
+   * Neither while another bypass tool or VPN is running: two tools changing
+   * the same connections is what makes every technique fail then, and Tor
+   * does not mend that. A first start on Türk Telekom beside GoodbyeDPI had
+   * all 20 techniques refused for discord.com, which worked without
+   * Shroudly, and asked "Open discord.com through Tor?" five seconds after
+   * the app first opened. The warning that names the tool is what is said
+   * (see _afterDiagnostics); looked for here too, since the question can
+   * come before the first look at the system has finished. */
+  async _torWanted(host) {
+    let tools = this.advice.conflicts || [];
+    if (!tools.length) {
+      try { tools = await this._runningTools(); } catch { tools = []; }
+      if (!this.active || !this.tor) return;
+    }
+    if (tools.length) {
+      if (this.logGate.allow('fallback-conflict', host || '*')) {
+        this.log('info', `The last way out: not ${this.store.get('torApproved', false) === true ? 'started' : 'asked'} for ${host || 'a site'} while ${tools.join(', ')} is running; two tools changing the same connections is why nothing got through`);
+      }
+      return;
+    }
+    if (this.store.get('torApproved', false) === true) {
+      // Which site needed it: "starting Tor" alone left a report unable
+      // to tell whether the app in question (Discord) was the one.
+      if (host && this.tor.status().state !== 'ready' && this.logGate.allow('fallback-need', host)) {
+        this.log('info', `${host}: no technique got through; the last way out (Tor) is needed for it`);
+      }
+      this.tor.need();
+    } else { try { this.onTorAsk(host); } catch {} }
+  }
+
+  /* The bypass tools and VPNs running now (a seam for the tests). */
+  _runningTools() { return diagnostics.runningTools({ ownTor: this.tor && this.tor.proc ? 1 : 0 }); }
+
   /* While another VPN or bypass tool is running, look again every half
    * minute, so the warning goes away by itself once the user quits it. */
   _watchConflicts() {
@@ -597,7 +703,7 @@ class EngineManager {
     this._conflictTimer = setInterval(async () => {
       if (!this.active) { clearInterval(this._conflictTimer); return; }
       let tools = [];
-      try { tools = await diagnostics.runningTools(); } catch { return; }
+      try { tools = await diagnostics.runningTools({ ownTor: this.tor && this.tor.proc ? 1 : 0 }); } catch { return; }
       this._setAdvice({ conflicts: tools });
       if (!tools.length) {
         clearInterval(this._conflictTimer);
@@ -750,13 +856,32 @@ class EngineManager {
     try { this.store.set(key, Object.fromEntries(keep)); } catch {}
   }
 
-  /* Oldest first, so where two names of one site disagree, the newer wins. */
+  _avoids(now = Date.now()) {
+    const all = this.store.get(AVOID_KEY);
+    if (!all || typeof all !== 'object') return [];
+    return Object.entries(all)
+      .filter(([h, v]) => /^[A-Za-z0-9.-]{1,253}$/.test(h) && v && Number(v.m) > 0 && now - Number(v.t) < AVOID_TTL_MS && Number(v.t) <= now + 60000);
+  }
+
+  _rememberAvoid(host, mask, t = Date.now()) {
+    if (!host || !/^[A-Za-z0-9.-]{1,253}$/.test(host)) return;
+    const keep = this._avoids(t).filter(([h]) => h !== host).slice(-(AVOID_MAX - 1));
+    keep.push([host, { m: mask & 3, t }]);
+    try { this.store.set(AVOID_KEY, Object.fromEntries(keep)); } catch {}
+  }
+
+  /* Oldest first, so where two names of one site disagree, the newer wins.
+   * What a server cannot take goes first: a technique of that kind is then
+   * not restored for it (engine_restore). */
   _restoreTechniques(now = Date.now()) {
+    const avoid = this._avoids(now);
     const list = [...this._learned(now, LEARNED_RAW_KEY), ...this._learned(now)];
-    if (!list.length || !this.proc || !this.proc.stdin) return;
+    if ((!list.length && !avoid.length) || !this.proc || !this.proc.stdin) return;
     try {
-      this.proc.stdin.write(list.map(([h, v]) => `LEARN ${h} ${v.s} ${Math.max(0, Math.round((now - v.t) / 1000))}\n`).join(''));
+      this.proc.stdin.write(avoid.map(([h, v]) => `AVOID ${h} ${v.m} ${Math.max(0, Math.round((now - v.t) / 1000))}\n`).join('')
+        + list.map(([h, v]) => `LEARN ${h} ${v.s} ${Math.max(0, Math.round((now - v.t) / 1000))}\n`).join(''));
     } catch {}
+    if (!list.length) return;
     this.log('info', `Techniques remembered for ${list.length} sites restored`);
   }
 
@@ -859,6 +984,7 @@ class EngineManager {
   }
 
   async _start() {
+    this.lastConns = null;
     if (this.active) return { success: true, alreadyActive: true };
 
     const bin = this.binPath;
@@ -1058,7 +1184,8 @@ class EngineManager {
 
   async _describeEnvironment() {
     let d;
-    try { d = await diagnostics.collect(); } catch { return; }
+    // Shroudly's own Tor (the last way out) is not another tool.
+    try { d = await diagnostics.collect({ ownTor: this.tor && this.tor.proc ? 1 : 0 }); } catch { return; }
 
     const net = `${d.iface.name} (${d.iface.kind})`;
     const dnsList = d.dnsServers.length ? d.dnsServers.join(', ') : 'unknown';
@@ -1148,6 +1275,7 @@ class EngineManager {
   _onLine(line, finishStart) {
     let msg;
     try { msg = JSON.parse(line); } catch { this.log('info', `engine: ${line}`); return; }
+    this._noteSiteEvent(msg);
     switch (msg.type) {
       case 'ready':
         this.techniques = Number(msg.techniques) || 0;
@@ -1155,6 +1283,7 @@ class EngineManager {
         this._restoreTechniques();
         // The names the user blocked in the Connections list (issue #74).
         this._applyBlocks();
+        this._applyTorSites();
         // Encrypted DNS routes that go through the engine can start now.
         this.doh.setSocksPort(msg.port);
         clearTimeout(this._dohReport);
@@ -1300,6 +1429,7 @@ class EngineManager {
       // with a technique of another kind, and that is what is kept.
       case 'refused':
         if (msg.next) this._rememberTechnique(msg.host, msg.next);
+        if (Number(msg.avoid) > 0) this._rememberAvoid(msg.host, Number(msg.avoid));
         this.log('warning', `${msg.host}: the browser refused the certificate the server sent after ${msg.strategy}; the next connection uses ${msg.next || 'no technique'} instead (reload the page)`);
         break;
       case 'cut':
@@ -1330,6 +1460,9 @@ class EngineManager {
         // names in the system's DNS cache are no sign of a program going
         // around Shroudly (around-watch.js).
         try { this.onHostEvent('netdns', msg.host, msg.stage || null); } catch {}
+        // The same name, address and outcome again (each of a page's
+        // connections asks): said once in NETDNS_AGAIN_MS.
+        if (!this._netdnsOnce(msg)) break;
         if (msg.stage === 'try') this.log('info', `${msg.host}: the addresses encrypted DNS gives get nowhere here; trying the one this network's DNS gives (${msg.addr})`);
         else if (msg.stage === 'ok') this.log('success', `${msg.host}: opened at the address this network's DNS gives (${msg.addr})`);
         else if (msg.stage === 'same') this.log('info', `${msg.host}: this network's DNS gives the same addresses (${msg.addr}); they get nowhere here`);
@@ -1362,7 +1495,14 @@ class EngineManager {
       case 'conn':
         if (this._connsRows) this._connsRows.push(msg);
         break;
+      // What the ad list stopped lately (listed with CONNS): Connections
+      // shows them with a button to let one through, the report lists them.
+      case 'ad':
+        if (this._connsAds) this._connsAds.push({ host: String(msg.host || ''), count: Number(msg.count) || 0, ago: Number(msg.ago) || 0 });
+        break;
       case 'conns_end':
+        if (this._connsAds) this.lastAds = this._connsAds.sort((a, b) => a.ago - b.ago);
+        this._connsAds = null;
         if (this._connsDone) { const done = this._connsDone; this._connsDone = null; done(this._connsRows || []); }
         this._connsRows = null;
         break;
@@ -1395,9 +1535,9 @@ class EngineManager {
         // once the user has said yes to it (issue #77); until then they are
         // asked (a notification and a card in the window), never Tor by itself.
         if (!msg.ok) {
-          if (!this.tor || !this._torFile || msg.why === 'file unusable' || this.store.get('torLastResort', true) === false) break;
-          if (this.store.get('torApproved', false) === true) this.tor.need();
-          else { try { this.onTorAsk(msg.host || ''); } catch {} }
+          // Not for an engine being stopped: a late line must not start Tor.
+          if (!this.active || !this.tor || !this._torFile || msg.why === 'file unusable' || this.store.get('torLastResort', true) === false) break;
+          this._torWanted(msg.host || '');
           break;
         }
         if (msg.host && this.logGate.allow('fallback', msg.host)) {
@@ -1405,6 +1545,16 @@ class EngineManager {
         }
         if (msg.host && this._blockedHold.has(msg.host)) { clearTimeout(this._blockedHold.get(msg.host)); this._blockedHold.delete(msg.host); }
         try { this.onHostEvent('fallback', msg.host || '', ''); } catch {}
+        break;
+      case 'direct':
+        // A name the last way out carried is reached without it again: a
+        // technique found behind it, or the network itself again (engine.c,
+        // bg_search). For the log: the name is off Tor from here on.
+        if (msg.host && this.logGate.allow('direct', msg.host)) {
+          this.log('info', msg.strategy
+            ? `${msg.host}: ${msg.strategy} opens it after all; it no longer goes through the last way out (Tor)`
+            : `${msg.host}: reached without the last way out (Tor) again`);
+        }
         break;
       case 'error':
         this.lastError = msg.msg || `code ${msg.code}`;
@@ -1567,6 +1717,17 @@ class EngineManager {
     return this._command(`ADBLOCK ${list}`);
   }
 
+  /* A netdns line not said in the last NETDNS_AGAIN_MS: false to keep quiet. */
+  _netdnsOnce(msg, now = Date.now()) {
+    if (!this._netdnsSaid) this._netdnsSaid = new Map();
+    const k = `${msg.stage} ${msg.host} ${msg.addr}`;
+    const at = this._netdnsSaid.get(k);
+    if (at !== undefined && now - at >= 0 && now - at < NETDNS_AGAIN_MS) return false;
+    if (this._netdnsSaid.size > 500) this._netdnsSaid.clear();
+    this._netdnsSaid.set(k, now);
+    return true;
+  }
+
   /* The Connections list (issue #74): what went through, by name, as the
    * engine counts it; [] while it is not running. */
   connsList(timeoutMs = 1500) {
@@ -1575,6 +1736,7 @@ class EngineManager {
     this._connsWait = new Promise((resolve) => {
       const timer = setTimeout(() => { this._connsDone = null; this._connsRows = null; resolve([]); }, timeoutMs);
       this._connsRows = [];
+      this._connsAds = [];
       this._connsDone = (rows) => { clearTimeout(timer); resolve(rows); };
       if (!this._command('CONNS')) { clearTimeout(timer); this._connsDone = null; this._connsRows = null; resolve([]); }
     }).finally(() => { this._connsWait = null; });
@@ -1607,6 +1769,84 @@ class EngineManager {
     this._command('BLOCK-CLEAR');
     for (const h of list) this._command(`BLOCK ${h}`);
     this.log('info', `Connections: ${list.length} name${list.length === 1 ? '' : 's'} you blocked are refused`);
+  }
+
+  /* The names the user sends through Tor (Settings key torSites; the
+   * Connections list), into a running engine: a site that turns the user's
+   * country away itself goes straight through the last way out. */
+  _applyTorSites() {
+    const sites = this.store.get('torSites', []);
+    const apps = TorApps.clean(this.store.get('torApps', []));
+    const list = this._torEntries();
+    if (!list.length) return;
+    this._command('TOR-CLEAR');
+    for (const h of list) this._command(`TOR ${h}`);
+    const n = Array.isArray(sites) ? sites.length : 0;
+    const parts = [];
+    if (n) parts.push(`${n} site${n === 1 ? '' : 's'} you send through Tor go there first`);
+    if (apps.length) parts.push(`${apps.map((id) => TorApps.APPS.find((a) => a.id === id).name).join(', ')} always through Tor`);
+    this.log('info', `Connections: ${parts.join('; ')}`);
+  }
+
+  /* Tor has just become ready: the names and ranges the user sends through
+   * it are given again, which ends their open connections (made the usual
+   * way while Tor was starting), so the apps connect again through Tor. */
+  torReady() {
+    if (!this._torEntries().length) return;
+    this._applyTorSites();
+  }
+
+  /* Every name and range the engine sends through Tor by the user's
+   * choice: the sites typed (torSites) and the apps picked (torApps). */
+  _torEntries() {
+    const sites = this.store.get('torSites', []);
+    return [...new Set([...(Array.isArray(sites) ? sites : []), ...TorApps.entriesOf(this.store.get('torApps', []))])];
+  }
+
+  /* An app picked in "Apps always through Tor", or put back: kept, and the
+   * running engine given what changed (a name another pick or a typed site
+   * still needs stays). */
+  setTorApp(id, on) {
+    const app = TorApps.APPS.find((a) => a.id === id);
+    if (!app) return { ok: false };
+    const before = new Set(this._torEntries());
+    const now = new Set(TorApps.clean(this.store.get('torApps', [])));
+    if (on) now.add(id); else now.delete(id);
+    this.store.set('torApps', TorApps.clean([...now]));
+    const after = new Set(this._torEntries());
+    for (const h of before) if (!after.has(h)) this._command(`UNTOR ${h}`);
+    for (const h of after) if (!before.has(h)) this._command(`TOR ${h}`);
+    this.log('info', on ? `Connections: ${app.name} goes through Tor (the last way out) from now on, all of it` : `Connections: ${app.name} goes the usual way again`);
+    const torApps = this.store.get('torApps', []);
+    return { ok: true, torApps, torAppNames: TorApps.entriesOf(torApps).filter((n) => !n.includes('/')) };
+  }
+
+  /* For a moment, a name through Tor while it is ready, without keeping it
+   * (a report that could not reach codeshare.me the usual way: Russia's
+   * networks slow Cloudflare's addresses down until nothing gets through).
+   * Returns what puts it back, or null when Tor is not ready. A name the
+   * user sends through Tor anyway stays there. */
+  torForNow(host) {
+    const h = String(host || '').trim().toLowerCase();
+    if (!this.isActive() || !this.tor || this.tor.state !== 'ready' || !/^[a-z0-9.-]{1,253}$/.test(h)) return null;
+    if (!this._command(`TOR ${h}`)) return null;
+    const kept = new Set(this._torEntries());
+    return () => { if (!kept.has(h) && !new Set(this._torEntries()).has(h)) this._command(`UNTOR ${h}`); };
+  }
+
+  /* A name sent through Tor, or back the usual way, from the Connections
+   * list: kept, and into the running engine at once (its open connections
+   * end, so the next ones take the new way). */
+  setTorSite(host, on) {
+    const h = String(host || '').trim().toLowerCase().replace(/\.$/, '');
+    if (!/^[a-z0-9._:-]{1,253}$/.test(h)) return { ok: false };
+    const now = new Set(this.store.get('torSites', []));
+    if (on) now.add(h); else now.delete(h);
+    this.store.set('torSites', [...now].sort());
+    // Back the usual way only if no app picked needs it too.
+    if (on || !TorApps.entriesOf(this.store.get('torApps', [])).includes(h)) this._command(on ? `TOR ${h}` : `UNTOR ${h}`);
+    this.log('info', on ? `Connections: ${h} goes through Tor (the last way out) from now on` : `Connections: ${h} goes the usual way again`);
+    return { ok: true, torSites: [...now] };
   }
 
   /* A name blocked or allowed again in the Connections list: kept, and into
@@ -1795,6 +2035,12 @@ class EngineManager {
       if (user) this._clearProxyEnv();
       return { success: true };
     }
+    // What went through, for a report sent after this stop: most are sent
+    // once the user has turned protection off. In memory only, until the
+    // next start (lastConns).
+    if (this.proc) {
+      try { const rows = await this.connsList(800); if (rows.length) this.lastConns = { rows, at: Date.now() }; } catch {}
+    }
     this.expectingStop = true;
     this._stopStatsPoll();
 
@@ -1817,7 +2063,8 @@ class EngineManager {
     this.startedAt = 0;
     this.doh.stop(); this.dohPort = 0;
     this._closeUpstream();
-    if (this.tor) this.tor.stop();
+    // Kept a few minutes: a quick Stop and Start goes on with it.
+    if (this.tor) this.tor.linger();
     this._torFile = null;
     this.store.set('runtimeActive', false);
     this.onStatusChange(false);
@@ -2054,3 +2301,4 @@ class EngineManager {
 module.exports = EngineManager;
 module.exports.coreBinaryPath = coreBinaryPath;
 module.exports.DEFAULT_SITE_LIST = DEFAULT_SITE_LIST;
+module.exports.FALLBACK_SITE_LIST = FALLBACK_SITE_LIST;

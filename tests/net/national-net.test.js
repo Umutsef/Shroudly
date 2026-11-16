@@ -27,8 +27,12 @@ const t = suite('national-net');
   const sites = { IR: ['www.digikala.com', 'www.aparat.com'], RU: ['ya.ru'] };
   const lookup = async (host) => (host === 'ya.ru' ? null : `10.0.0.${host.length}`);
   const hs = async ({ servername }) => (servername === 'www.aparat.com' ? 'ok' : 'timeout');
-  const r = await domesticAnswers({ sites, lookup, hs, ms: 200 });
+  const r = await domesticAnswers({ sites, lookup, hs, ms: 200, tz: 'UTC' });
   t.ok(r && r.country === 'IR' && r.host === 'www.aparat.com', `a site inside the country answering with its own certificate: that country (${JSON.stringify(r)})`);
+  t.ok(await domesticAnswers({ sites, lookup, hs, ms: 200, tz: 'Europe/Istanbul' }) === null,
+    'an Iranian site answering a computer whose time zone is Turkey\'s: not a national-only network (SR-XM82)');
+  t.ok((await domesticAnswers({ sites, lookup, hs, ms: 200, tz: 'Asia/Tehran' }) || {}).country === 'IR', 'with Iran\'s time zone: Iran');
+  t.ok(await domesticAnswers({ sites, lookup, hs, ms: 200, tz: 'Asia/Qatar' }) === null, 'a zone of a country off the list (Qatar): not a national-only network (SR-F040)');
 
   t.ok(await domesticAnswers({ sites, lookup: async () => null, hs, ms: 200 }) === null, 'no name resolving: nothing');
   t.ok(await domesticAnswers({ sites, lookup, hs: async () => 'ECONNRESET', ms: 200 }) === null, 'none answering: nothing');
@@ -72,7 +76,8 @@ const t = suite('national-net');
   t.ok(N.homeCountry({ tz: 'Asia/Tehran' }) === 'IR' && N.homeCountry({ tz: 'Europe/Moscow' }) === 'RU' && N.homeCountry({ tz: 'Asia/Baku' }) === 'AZ'
     && N.homeCountry({ tz: 'Europe/Berlin' }) === null && N.homeCountry({ tz: '' }) === null,
   'the country from the time zone (Tehran: IR, Moscow: RU, Baku: AZ; Berlin: none)');
-  t.ok(N.homeCountry({ remembered: 'IR', tz: 'Europe/Berlin' }) === 'IR' && N.homeCountry({ remembered: 'ZZ', tz: 'Asia/Tehran' }) === 'IR',
+  t.ok(N.homeCountry({ remembered: 'IR', tz: 'Europe/Istanbul' }) === 'TR', 'the time zone\'s country comes before one remembered from a shutdown (SR-XM82: a phone in Turkey taken for Iranian)');
+  t.ok(N.homeCountry({ remembered: 'IR', tz: 'UTC' }) === 'IR' && N.homeCountry({ remembered: 'IR', tz: 'Asia/Qatar' }) === null && N.homeCountry({ remembered: 'ZZ', tz: 'Asia/Tehran' }) === 'IR',
     'one a shutdown showed comes first; an unknown one is not taken');
   const allZones = Object.values(N.ZONES).flat();
   let validZones = true;

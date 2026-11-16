@@ -27,7 +27,8 @@ import android.widget.TextView
 import java.text.NumberFormat
 
 /* The one window: a switch, what it is doing, live counters, and About. */
-class MainActivity : Activity() {
+/* Started as HomeActivity (see there): open, so that it can be. */
+open class MainActivity : Activity() {
     companion object {
         private const val REQUEST_VPN = 1
         private const val REQUEST_NOTIFICATIONS = 2
@@ -60,10 +61,24 @@ class MainActivity : Activity() {
     private lateinit var detailMore: TextView
     private lateinit var hint: View
     private lateinit var hintLabel: TextView
+    private lateinit var tapHint: TextView
+    // The state the phone last ticked for (render).
+    private var lastFelt: Protection.State? = null
+    // The desktop's frame (Chrome): the status pill on top, the tab shown.
+    private lateinit var pill: TextView
+    private var tab = Chrome.Tab.PROTECTION
     private lateinit var connections: TextView
     private lateinit var connectionsTotal: TextView
-    private lateinit var upload: TextView
-    private lateinit var download: TextView
+    private lateinit var rateUp: TextView
+    private lateinit var rateDown: TextView
+    private lateinit var sparkUp: Spark
+    private lateinit var sparkDown: Spark
+    private lateinit var bypassed: TextView
+    private lateinit var transferred: TextView
+    private lateinit var onlineCard: View
+    // The last counters the speeds were worked out from.
+    private var rateAt = 0L
+    private var rateBytes = longArrayOf(-1, -1)
     private lateinit var uptime: TextView
     private lateinit var statsHint: View
     private lateinit var onlineNow: TextView
@@ -120,6 +135,8 @@ class MainActivity : Activity() {
     // Android would not ask for the VPN at all (another app's always-on VPN,
     // or VPN changes not allowed on this phone): see onActivityResult.
     private var vpnBlocked = false
+    // "Use VPN mode" pressed while Proxy only ran: started once it is off.
+    private var vpnAfterProxy = false
     // The VPN's consent asked for (uptime), and whether its dialog took the
     // window's focus, as a dialog the user answers does.
     private var consentAskedAt = 0L
@@ -147,22 +164,34 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         ShroudlyVpnService.attachLog(this)
         setContentView(R.layout.activity_main)
+        val (header, p) = Chrome.header(this)
+        pill = p
+        findViewById<android.widget.FrameLayout>(R.id.headerHost).addView(header)
+        tab = intent?.getStringExtra(Chrome.EXTRA_TAB)?.let { n -> Chrome.Tab.values().firstOrNull { it.name == n } } ?: Chrome.Tab.PROTECTION
+        showTab(tab)
         edgeToEdge()
         Tv.rings(window)
 
         toggle = findViewById(R.id.toggle)
-        orb = Orb(findViewById(R.id.halo), findViewById(R.id.ring), findViewById(R.id.toggleIcon))
+        orb = Orb(findViewById(R.id.halo), findViewById(R.id.ring), findViewById(R.id.toggleIconClosed), findViewById(R.id.toggleIcon))
         status = findViewById(R.id.status)
         detail = findViewById(R.id.detail)
         detailMore = findViewById(R.id.detailMore)
         hint = findViewById(R.id.hint)
         hintLabel = findViewById(R.id.hintLabel)
+        tapHint = findViewById(R.id.tapHint)
         connections = findViewById(R.id.connections)
         // Connections by site, with blocking (issue #74).
         findViewById<View>(R.id.connectionsTile).setOnClickListener { startActivity(android.content.Intent(this, ConnectionsActivity::class.java)) }
         connectionsTotal = findViewById(R.id.connectionsTotal)
-        upload = findViewById(R.id.upload)
-        download = findViewById(R.id.download)
+        rateUp = findViewById(R.id.rateUp)
+        rateDown = findViewById(R.id.rateDown)
+        sparkUp = findViewById(R.id.sparkUp)
+        sparkDown = findViewById(R.id.sparkDown)
+        sparkUp.color = getColor(R.color.text_dim)
+        bypassed = findViewById(R.id.bypassed)
+        transferred = findViewById(R.id.transferred)
+        onlineCard = findViewById(R.id.onlineCard)
         uptime = findViewById(R.id.uptime)
         statsHint = findViewById(R.id.statsHint)
         onlineNow = findViewById(R.id.onlineNow)
@@ -191,15 +220,28 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.privacy).setOnClickListener { open(UpdateCheck.PRIVACY_URL) }
         findViewById<View>(R.id.website).setOnClickListener { open("https://codeshare.me") }
         findViewById<View>(R.id.shareLogs).setOnClickListener { shareLogs() }
+        // Logs from About (not a tab: Chrome.tabs).
+        val logsTab = Chrome.Tab.LOGS in Chrome.tabs(this)
+        findViewById<View>(R.id.logsRow).apply {
+            visibility = if (logsTab) View.GONE else View.VISIBLE
+            setOnClickListener { showTab(Chrome.Tab.LOGS) }
+        }
+        findViewById<View>(R.id.logsRowDivider).visibility = if (logsTab) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.reportLink).setOnClickListener { startActivity(Intent(this, ReportActivity::class.java)) }
         findViewById<View>(R.id.helpOthers).setOnClickListener { showHelpOthers() }
+        // Not where Tor itself is blocked: the user there needs the help.
+        if (HelpNudge.torBlockedHere(this)) for (id in intArrayOf(R.id.helpOthers, R.id.helpOthersDivider)) findViewById<View>(id).visibility = View.GONE
         // "Share Shroudly": the APK to another phone, where there is one file to pass on.
         val apk = ApkShare.available(this)
         findViewById<View>(R.id.shareApp).apply { visibility = if (apk) View.VISIBLE else View.GONE; setOnClickListener { ApkShare.share(this@MainActivity) } }
         findViewById<View>(R.id.shareAppDivider).visibility = if (apk) View.VISIBLE else View.GONE
-        // Settings: the gear at the top, and the row under About.
-        val settings = View.OnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        findViewById<View>(R.id.settings).setOnClickListener(settings)
-        findViewById<View>(R.id.settingsTop).setOnClickListener(settings)
+        // Settings: its tab at the bottom, and the row under About.
+        findViewById<View>(R.id.logsCopy).setOnClickListener {
+            val cm = getSystemService(android.content.ClipboardManager::class.java)
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText("Shroudly", AppLog.snapshot(sites = true).joinToString("\n")))
+            (it as TextView).setText(R.string.logsCopied)
+        }
+        findViewById<View>(R.id.logsShare).setOnClickListener { shareLogs() }
         noticeOpen.setOnClickListener {
             if (noticeShown == R.string.androidBatterySettings) openBatterySettings() else openNotificationSettings()
         }
@@ -215,13 +257,29 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.torAskYes).setOnClickListener {
             TorRoute.setApproved(this, true)
             TorAsk.clear(this)
-            Protector.tell(this, ShroudlyVpnService.ACTION_SETTINGS, "torYes")
+            // Asked again with the last way out off (TorAsk.askAgain): on,
+            // and the engine started again with it.
+            if (!TorRoute.enabled(this)) {
+                TorRoute.setEnabled(this, true)
+                Protector.tell(this, ShroudlyVpnService.ACTION_SETTINGS, "torLastResort")
+            } else Protector.tell(this, ShroudlyVpnService.ACTION_SETTINGS, "torYes")
             render()
         }
         findViewById<View>(R.id.torAskNo).setOnClickListener {
             TorRoute.setEnabled(this, false)
+            TorAsk.rest(this)
             TorAsk.clear(this)
             Protector.tell(this, ShroudlyVpnService.ACTION_SETTINGS, "torLastResort")
+            render()
+        }
+        // The lite APK: a site stayed shut that the full APK's Tor could
+        // open (LiteOffer): the full APK installed over this one, or a rest.
+        findViewById<View>(R.id.liteOfferGet).setOnClickListener {
+            ApkUpdates.startFull(this)
+            render()
+        }
+        findViewById<View>(R.id.liteOfferLater).setOnClickListener {
+            LiteOffer.rest(this)
             render()
         }
         findViewById<View>(R.id.supportRow).setOnClickListener { openSupport() }
@@ -268,6 +326,7 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        intent.getStringExtra(Chrome.EXTRA_TAB)?.let { n -> Chrome.Tab.values().firstOrNull { it.name == n } }?.let { showTab(it) }
         handleStart(intent)
         handleInstall(intent)
         handleConfirmStop(intent)
@@ -330,6 +389,8 @@ class MainActivity : Activity() {
         showNotice()
         // Is Shroudly on Google Play (stores.json): asked now and then.
         Stores.refreshIfDue(this, Protection.socksPort, Protection.socksAuth)
+        // The remote settings, every six hours (RemoteConfig).
+        RemoteConfig.refreshIfDue(this, Protection.socksPort, Protection.socksAuth)
         fromPlay = StoreCards.fromPlay(InstallSource.installer(this))
         playStore = !fromPlay && StoreCards.playStoreInstalled(this)
         country = Country.of(this)
@@ -404,7 +465,7 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION")
             window.setDecorFitsSystemWindows(false)
         }
-        val root = findViewById<ScrollView>(R.id.root)
+        val root = findViewById<View>(R.id.frame)
         root.setOnApplyWindowInsetsListener { v, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -416,7 +477,7 @@ class MainActivity : Activity() {
 
     private fun onToggle() {
         when (Protection.state) {
-            Protection.State.ON -> if (Protection.lockdown && !Protection.proxyOnly) confirmStop() else Protector.stop(this)
+            Protection.State.ON -> if (Protection.lockdown && !Protection.proxyOnly) confirmStop() else Protector.stop(this, "the window")
             Protection.State.OFF -> {
                 vpnDenied = false
                 vpnBlocked = false
@@ -540,13 +601,15 @@ class MainActivity : Activity() {
     /* "Help people in censored countries": the apps made for it (HelpOthers). */
     private fun showHelpOthers() {
         try {
-            AlertDialog.Builder(this)
+            val b = AlertDialog.Builder(this)
                 .setTitle(R.string.helpOthers)
                 .setMessage(R.string.helpOthersBody)
                 .setPositiveButton(R.string.helpOthersConduit) { _, _ -> open(HelpOthers.conduitUrl(resources.configuration.locales[0].language)) }
-                .setNeutralButton(R.string.helpOthersOrbot) { _, _ -> open(HelpOthers.orbotUrl()) }
                 .setNegativeButton(android.R.string.cancel, null)
-                .show()
+            // Orbot is Tor's: not offered in the lite APK, which has nothing
+            // of Tor's (issue #75); Psiphon's Conduit stays.
+            if (BuildConfig.APK_VARIANT != "lite") b.setNeutralButton(R.string.helpOthersOrbot) { _, _ -> open(HelpOthers.orbotUrl()) }
+            b.show()
         } catch (_: Exception) {}
     }
 
@@ -580,6 +643,16 @@ class MainActivity : Activity() {
         if (Protection.state == Protection.State.OFF) startService()
     }
 
+    /* From Proxy only to VPN mode: every app through Shroudly; Android asks
+     * for the VPN (and ends another VPN app's) as at any VPN start. */
+    private fun useVpnMode() {
+        AppSettings.setProxyOnly(this, false)
+        ShroudlyVpnService.log("VPN mode chosen in the window: every app goes through Shroudly")
+        if (Protection.state == Protection.State.OFF) { startWithConsent(); return }
+        vpnAfterProxy = true
+        Protector.stop(this, "the window")
+    }
+
     private fun openVpnSettings() {
         for (action in listOf(Settings.ACTION_VPN_SETTINGS, Settings.ACTION_WIRELESS_SETTINGS, Settings.ACTION_SETTINGS)) {
             try { startActivity(Intent(action)); return } catch (_: ActivityNotFoundException) {}
@@ -592,11 +665,11 @@ class MainActivity : Activity() {
         try {
             AlertDialog.Builder(this)
                 .setMessage(R.string.androidLockdownStop)
-                .setPositiveButton(R.string.stop) { _, _ -> if (Protection.state == Protection.State.ON) Protector.stop(this) }
+                .setPositiveButton(R.string.stop) { _, _ -> if (Protection.state == Protection.State.ON) Protector.stop(this, "the window") }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         } catch (_: Exception) {
-            Protector.stop(this)
+            Protector.stop(this, "the window")
         }
     }
 
@@ -612,6 +685,8 @@ class MainActivity : Activity() {
 
     @SuppressLint("SetTextI18n")
     private fun render() {
+        findViewById<View>(R.id.reportLink).visibility = if (Report.offered(this)) View.VISIBLE else View.GONE
+        if (vpnAfterProxy && Protection.state == Protection.State.OFF) { vpnAfterProxy = false; startWithConsent() }
         val st = Protection.state
         val on = st == Protection.State.ON
         val busy = st == Protection.State.STARTING || st == Protection.State.STOPPING
@@ -626,6 +701,23 @@ class MainActivity : Activity() {
             val h = torAsk.ifEmpty { "…" }
             findViewById<TextView>(R.id.torAskTitle).text = text(R.string.torAskTitle, "host" to h)
             findViewById<TextView>(R.id.torAskText).text = text(R.string.torAskCard, "host" to h)
+        }
+        // The lite APK's offer of the full one (LiteOffer), and how its
+        // download stands once asked for (ApkUpdates, this same version).
+        val lite = if (on && torAsk == null) Protection.liteOffer else null
+        findViewById<View>(R.id.liteOfferCard).visibility = if (lite != null) View.VISIBLE else View.GONE
+        if (lite != null) {
+            val v = BuildConfig.VERSION_NAME
+            val now = ApkUpdates.now?.takeIf { it.version == v }
+            findViewById<TextView>(R.id.liteOfferTitle).text = text(R.string.liteOfferTitle, "host" to lite)
+            findViewById<TextView>(R.id.liteOfferText).text = when (now?.stage) {
+                ApkUpdates.Stage.DOWNLOADING -> text(R.string.updDownloading, "version" to v, "percent" to now.percent)
+                ApkUpdates.Stage.WAITING -> text(R.string.updReady, "version" to v)
+                ApkUpdates.Stage.FAILED -> getString(now.failed)
+                null -> text(R.string.liteOfferCard, "host" to lite)
+            }
+            val busy = now?.stage == ApkUpdates.Stage.DOWNLOADING || now?.stage == ApkUpdates.Stage.WAITING
+            findViewById<View>(R.id.liteOfferGet).visibility = if (busy) View.GONE else View.VISIBLE
         }
 
         val statusText = getString(
@@ -702,10 +794,14 @@ class MainActivity : Activity() {
                 detail.show(getString(Protection.troubleRes))
                 detail.setTextColor(getColor(R.color.warn))
             }
+            // Proxy only and no network sent to it: no app but one set up by
+            // hand goes through, so a user who only knows the big button got
+            // nothing (an Iranian report: "how do I open YouTube with it?").
+            // Said plainly, with VPN mode a tap away.
             proxyIdle -> {
-                detail.show(text(R.string.androidProxyNotSet, "port" to Protection.socksPort))
+                detail.show(text(R.string.androidProxyIdleVpn, "port" to Protection.socksPort))
                 detail.setTextColor(getColor(R.color.warn))
-                more = R.string.androidWifiSettings
+                more = R.string.androidUseVpnMode
             }
             error != 0 && off -> {
                 // In the user's language, as the window says it (no "open
@@ -723,7 +819,7 @@ class MainActivity : Activity() {
             // Working through the user's own server: the address sites see
             // (issue #66), so no site has to be opened to check.
             on && !proxyIdle && Protection.ownServerExit != null -> {
-                detail.show(text(R.string.ownServerExit, "ip" to (Protection.ownServerExit ?: "")))
+                detail.show(text(R.string.ownServerExit, "ip" to OwnServer.withPlace(Protection.ownServerExit ?: "", Protection.ownServerExitCc, resources.configuration.locales[0])))
                 detail.setTextColor(getColor(R.color.text_dim))
             }
             // Apps' lookups go around the tunnel (DnsNotice): what to turn off.
@@ -768,15 +864,37 @@ class MainActivity : Activity() {
                 when (more) {
                     R.string.androidVpnSettings -> openVpnSettings()
                     R.string.androidWifiSettings -> openWifiSettings(this)
+                    R.string.androidUseVpnMode -> useVpnMode()
                     R.string.nationalOnlyHelp -> open(NationalNet.guideUrl(resources.configuration.locales[0].language))
                     else -> showDetail()
                 }
             }
         }
 
-        // Under the status, what a tap on the switch does; nothing while it works.
+        // Phones and tablets: the round switch is the button ("Tap to start"
+        // under it), with a tick of the phone as it comes on or goes off.
+        // Android TV keeps the desktop's one button under the status, for
+        // the remote; nothing while it works. Filled in the accent to start,
+        // quieter to stop.
+        val tv = Tv.isTv(this)
+        tapHint.visibility = if (tv) View.GONE else View.VISIBLE
+        tapHint.show(if (busy) " " else getString(if (on) R.string.tapToStop else R.string.tapToStart))
+        if (!tv && lastFelt != null && lastFelt != Protection.state && (on || Protection.state == Protection.State.OFF)) {
+            toggle.performHapticFeedback(
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    if (on) android.view.HapticFeedbackConstants.CONFIRM else android.view.HapticFeedbackConstants.REJECT
+                } else android.view.HapticFeedbackConstants.VIRTUAL_KEY,
+            )
+        }
+        lastFelt = Protection.state
         if (!busy) hintLabel.show(getString(if (on) R.string.stop else R.string.start))
-        hint.visibility = if (busy) View.INVISIBLE else View.VISIBLE
+        hint.visibility = if (!tv) View.GONE else if (busy) View.INVISIBLE else View.VISIBLE
+        hint.setBackgroundResource(if (on) R.drawable.card else R.drawable.button_accent)
+        val onButton = getColor(if (on) R.color.text else R.color.on_accent)
+        hintLabel.setTextColor(onButton)
+        findViewById<android.widget.ImageView>(R.id.hintIcon).imageTintList = android.content.res.ColorStateList.valueOf(onButton)
+        Chrome.updatePill(this, pill)
+        if (tab == Chrome.Tab.LOGS) renderLogs()
 
         val s = Protection.stats
         if (on && s != null) {
@@ -786,19 +904,44 @@ class MainActivity : Activity() {
             val total = text(R.string.totalCount, "count" to n.format(s.connsTotal))
             // With "Block ads and trackers": how many it ended, beside it.
             connectionsTotal.show(if (s.blocked > 0) "$total · ${getString(R.string.adsBlocked)}: ${n.format(s.blocked)}" else total)
-            upload.show(Format.bytes(s.bytesUp))
-            download.show(Format.bytes(s.bytesDown))
+            bypassed.show(n.format(s.desync))
+            transferred.show(Format.bytes(s.bytesUp + s.bytesDown))
             uptime.show(Format.duration(android.os.SystemClock.elapsedRealtime() - Protection.startedAt))
+            // The speeds: what the counters grew by since the last look.
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (rateBytes[0] < 0) {
+                rateBytes = longArrayOf(s.bytesDown, s.bytesUp)
+                rateAt = now
+                rateDown.show("0 B/s")
+                rateUp.show("0 B/s")
+            } else if (now - rateAt >= 900) {
+                val dt = (now - rateAt) / 1000f
+                val down = maxOf(0L, s.bytesDown - rateBytes[0]) / dt
+                val up = maxOf(0L, s.bytesUp - rateBytes[1]) / dt
+                rateBytes = longArrayOf(s.bytesDown, s.bytesUp)
+                rateAt = now
+                rateDown.show("${Format.bytes(down.toLong())}/s")
+                rateUp.show("${Format.bytes(up.toLong())}/s")
+                sparkDown.push(down)
+                sparkUp.push(up)
+            }
             statsHint.visibility = View.GONE
             // The live total this phone is counted in ("Count me in", Settings).
             val online = OnlineCount.online()
-            if (online != null) onlineNow.show("${getString(R.string.onlineNow)}: ${n.format(online)}")
-            onlineNow.visibility = if (online != null) View.VISIBLE else View.GONE
+            if (online != null) onlineNow.show(n.format(online))
+            onlineCard.visibility = if (online != null) View.VISIBLE else View.GONE
         } else {
             // Set only when it changes: the window redraws every second, and a
             // text set again is announced to accessibility services again.
-            for (v in listOf(connections, upload, download, uptime)) v.show("–")
-            onlineNow.visibility = View.GONE
+            for (v in listOf(connections, bypassed, transferred, uptime)) v.show("–")
+            rateDown.show("0 B/s")
+            rateUp.show("0 B/s")
+            if (rateBytes[0] >= 0) {
+                rateBytes = longArrayOf(-1, -1)
+                sparkDown.clear()
+                sparkUp.clear()
+            }
+            onlineCard.visibility = View.GONE
             connectionsTotal.show(text(R.string.totalCount, "count" to "–"))
             // "Start protection to see live traffic": while it is off, not
             // while it starts or stops.
@@ -1086,6 +1229,51 @@ class MainActivity : Activity() {
      * the sites Shroudly handled, with the choice to leave them out: a bare
      * share sheet said neither, and a log with someone's browsing could end
      * up in a public issue. */
+    /* A tab of the bottom bar: Protection, Stats, Logs and About are pages
+     * here; Settings and Follow are screens of their own (Chrome.go). */
+    // A sideways swipe goes to the tab beside it (Chrome.Swipe).
+    private val swipe by lazy { Chrome.Swipe(this, { tab }) { showTab(it) } }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        swipe.feed(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun showTab(t: Chrome.Tab) {
+        if (t == Chrome.Tab.SETTINGS || t == Chrome.Tab.FOLLOW) { Chrome.go(this, t); return }
+        // The new page slides in a little from the side it is on.
+        val from = Chrome.Tab.values().indexOf(tab)
+        val to = Chrome.Tab.values().indexOf(t)
+        val page = findViewById<View>(R.id.root)
+        if (from != to && android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            val rtl = resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL
+            val side = (if (to > from) 1 else -1) * (if (rtl) -1 else 1)
+            page.translationX = side * 28 * resources.displayMetrics.density
+            page.alpha = 0.5f
+            page.animate().translationX(0f).alpha(1f).setDuration(200).start()
+        }
+        tab = t
+        findViewById<View>(R.id.pageHome).visibility = if (t == Chrome.Tab.PROTECTION) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.pageStats).visibility = if (t == Chrome.Tab.STATS) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.pageLogs).visibility = if (t == Chrome.Tab.LOGS) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.pageAbout).visibility = if (t == Chrome.Tab.ABOUT) View.VISIBLE else View.GONE
+        val host = findViewById<android.widget.FrameLayout>(R.id.bottomHost)
+        host.removeAllViews()
+        host.addView(Chrome.bottomBar(this, t) { showTab(it) })
+        findViewById<ScrollView>(R.id.root).scrollTo(0, 0)
+        if (t == Chrome.Tab.LOGS) {
+            findViewById<TextView>(R.id.logsCopy).setText(R.string.copyLogs)
+            renderLogs()
+        }
+    }
+
+    /* The Logs page: the app's own log, the last 400 lines. */
+    private fun renderLogs() {
+        val lines = AppLog.snapshot(sites = true).takeLast(400)
+        findViewById<TextView>(R.id.logsText).text = if (lines.isEmpty()) getString(R.string.noLogs) else lines.joinToString("\n")
+        findViewById<TextView>(R.id.logsCount).text = text(R.string.logEntries, "count" to lines.size)
+    }
+
     private fun shareLogs() {
         try {
             AlertDialog.Builder(this)

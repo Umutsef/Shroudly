@@ -44,7 +44,7 @@ enum Strategies {
 
 struct AppSettings: Equatable {
     var strategyId = Strategies.all[0].id
-    var quicOff = false
+    var quicOff = true
     var ipv6Off = false
     var keepOn = false
     var ownServer = ""
@@ -55,15 +55,30 @@ struct AppSettings: Equatable {
     // "When nothing else works: the Tor network" (Tunnel/TorRoute.swift): on
     // unless turned off; nothing to do on Apple TV, which has no Tor.
     var torLastResort = true
+    // The Mac: every app's connections through the tunnel (a VPN), or, by
+    // default, Shroudly as the Mac's proxy, as the desktop app from GitHub
+    // works: the apps that use the system's proxy (browsers and most others)
+    // go through it, the rest straight, much lighter than every packet of
+    // the Mac in the tunnel. Not on iPhone, iPad or Apple TV (always all).
+    var macAllApps = false
 
     var strategy: Strategy { Strategies.byId(strategyId) }
+
+    /* Shroudly as the Mac's proxy, no packets in the tunnel. */
+    var proxyOnly: Bool {
+        #if os(macOS)
+        return !macAllApps
+        #else
+        return false
+        #endif
+    }
 
     /* What the engine and the tunnel are started with; keepOn is the
      * system's business (on demand), not theirs. */
     func sameTunnel(as other: AppSettings) -> Bool {
         strategy == other.strategy && quicOff == other.quicOff && ipv6Off == other.ipv6Off && ownServer == other.ownServer
             && dnsKind == other.dnsKind && dnsServer == other.dnsServer && dnsStrict == other.dnsStrict
-            && torLastResort == other.torLastResort
+            && torLastResort == other.torLastResort && macAllApps == other.macAllApps
     }
 
     /* The own server in use, or nil (none, or a link that cannot be used). */
@@ -73,11 +88,16 @@ struct AppSettings: Equatable {
 final class SettingsStore {
     private enum Key {
         static let strategy = "strategyId"
-        static let quicOff = "quicOff"
+        // "quicOff2" from 2.6.65: QUIC off unless the user turns it back on
+        // (over QUIC no technique works); the old key held false for anyone
+        // whose settings were ever saved, chosen or not, so only a true there
+        // was a choice and is kept.
+        static let quicOff = "quicOff2"
         static let ipv6Off = "ipv6Off"
         static let keepOn = "keepOn"
         static let ownServer = "ownServer"
         static let torLastResort = "torLastResort"
+        static let macAllApps = "macAllApps"
     }
 
     private let defaults: UserDefaults
@@ -89,11 +109,12 @@ final class SettingsStore {
     func load() -> AppSettings {
         var s = AppSettings()
         s.strategyId = Strategies.byId(defaults.string(forKey: Key.strategy)).id
-        s.quicOff = defaults.bool(forKey: Key.quicOff)
+        s.quicOff = defaults.object(forKey: Key.quicOff) as? Bool ?? true
         s.ipv6Off = defaults.bool(forKey: Key.ipv6Off)
         s.keepOn = defaults.bool(forKey: Key.keepOn)
         s.ownServer = defaults.string(forKey: Key.ownServer) ?? ""
         s.torLastResort = defaults.object(forKey: Key.torLastResort) as? Bool ?? true
+        s.macAllApps = defaults.bool(forKey: Key.macAllApps)
         s.dnsKind = defaults.string(forKey: CustomDns.Key.kind) ?? "auto"
         s.dnsServer = defaults.string(forKey: CustomDns.Key.server) ?? ""
         s.dnsStrict = defaults.bool(forKey: CustomDns.Key.strict)
@@ -107,6 +128,7 @@ final class SettingsStore {
         defaults.set(s.keepOn, forKey: Key.keepOn)
         defaults.set(s.ownServer, forKey: Key.ownServer)
         defaults.set(s.torLastResort, forKey: Key.torLastResort)
+        defaults.set(s.macAllApps, forKey: Key.macAllApps)
         if s.dnsKind == "auto" || s.dnsServer.isEmpty {
             for k in [CustomDns.Key.kind, CustomDns.Key.server, CustomDns.Key.strict] { defaults.removeObject(forKey: k) }
         } else {

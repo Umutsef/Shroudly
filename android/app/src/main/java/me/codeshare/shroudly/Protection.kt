@@ -29,6 +29,9 @@ object Protection {
     /* A site needs Tor and the user has not said yes yet (TorAsk): its name
      * ("" when the engine did not give one), null when nothing is asked. */
     @Volatile var torAsk: String? = null
+    /* The lite APK: a site stayed shut that the full APK's Tor could open
+     * (LiteOffer); its name, null when nothing is offered. */
+    @Volatile var liteOffer: String? = null
     // How Android runs this VPN, and whether it carries IPv6 (for "Share logs").
     @Volatile var alwaysOn = false
     @Volatile var lockdown = false
@@ -56,6 +59,8 @@ object Protection {
     /* While on and working through the user's own server: the address sites
      * see through it (OwnServer.exitAddress, issue #66), or null. */
     @Volatile var ownServerExit: String? = null
+    /* Its country (Cloudflare's "loc=", issue #60), or null. */
+    @Volatile var ownServerExitCc: String? = null
         private set
 
     private val listeners = CopyOnWriteArraySet<() -> Unit>()
@@ -65,11 +70,19 @@ object Protection {
         state = s
         if (s == State.STARTING) { errorRes = 0; errorDetail = null }
         if (s != State.ON) { socksPort = 0; socksAuth = null; proxyPortTaken = 0 }
-        if (s == State.OFF) { stats = null; startedAt = 0; dnsAround = false; torAsk = null; proxyOnly = false; national = null; ownServerDown = null; ownServerExit = null }
+        if (s == State.OFF) { stats = null; startedAt = 0; dnsAround = false; torAsk = null; liteOffer = null; proxyOnly = false; national = null; ownServerDown = null; ownServerExit = null; ownServerExitCc = null }
         changed()
     }
 
+    /* When Shroudly last went wrong itself (Report.offered). */
+    @Volatile var faultAt = 0L
+
+    /* What is not Shroudly's own going wrong, and offers no report: the
+     * network gone (or offline under lockdown), the user refusing the VPN. */
+    private val NOT_OURS = setOf(R.string.androidNoNetwork, R.string.androidLockdownOffline, R.string.androidVpnDenied)
+
     fun fail(res: Int, detail: String?) {
+        if (res !in NOT_OURS) faultAt = System.currentTimeMillis()
         errorRes = res
         errorDetail = detail
         changed()
@@ -77,6 +90,7 @@ object Protection {
 
     fun trouble(res: Int) {
         if (troubleRes == res) return
+        if (res != 0 && res !in NOT_OURS) faultAt = System.currentTimeMillis()
         troubleRes = res
         changed()
     }
@@ -87,9 +101,10 @@ object Protection {
         changed()
     }
 
-    fun ownServerExit(v: String?) {
-        if (ownServerExit == v) return
+    fun ownServerExit(v: String?, cc: String? = null) {
+        if (ownServerExit == v && ownServerExitCc == cc) return
         ownServerExit = v
+        ownServerExitCc = cc
         changed()
     }
 

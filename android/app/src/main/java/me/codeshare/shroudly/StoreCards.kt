@@ -120,6 +120,7 @@ object StoreCards {
      * days. A tap opens the window, which shows the card. */
     fun look(ctx: Context, port: Int, auth: SocksAuth?) {
         Stores.refreshIfDue(ctx, port, auth)
+        RemoteConfig.refreshIfDue(ctx, port, auth)
         val now = System.currentTimeMillis()
         if (promptedThisRun || !windowIdle(Usage.windowSeenAt(ctx), now)) return
         val working = Protection.state == Protection.State.ON && Protection.troubleRes == 0
@@ -130,14 +131,14 @@ object StoreCards {
         try {
             ShroudlyVpnService.channels(ctx)
             val open = android.app.PendingIntent.getActivity(
-                ctx, NOTICE_ID, android.content.Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_STORE_CARD, MOVE)
+                ctx, NOTICE_ID, android.content.Intent(ctx, HomeActivity::class.java).putExtra(MainActivity.EXTRA_STORE_CARD, MOVE)
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val body = ctx.getString(R.string.androidMoveBody)
             // The quiet channel (protection's own: low, no sound, no heads-up).
             val n = android.app.Notification.Builder(ctx, ShroudlyVpnService.CHANNEL)
-                .setSmallIcon(R.drawable.ic_shield)
+                .setSmallIcon(R.drawable.ic_stat_logo)
                 .setContentTitle(ctx.getString(R.string.androidMoveTitle))
                 .setContentText(body)
                 .setStyle(android.app.Notification.BigTextStyle().bigText(body))

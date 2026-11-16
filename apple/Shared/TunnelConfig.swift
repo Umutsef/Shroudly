@@ -18,8 +18,9 @@ import Security
  * which no real host uses: the tunnel and its DNS server in 198.18.0.0/16,
  * the stand-in addresses in 198.19.0.0/16. Each hev started gets the next
  * quarter of that range, so an address an app kept from an earlier one is in
- * none of the new one's names; the engine refuses it at once (--fake-net)
- * and the app looks the name up again, never reaching another site.
+ * none of the new one's names; it reaches the engine as it is (--fake-net),
+ * which takes the connection by the name in its first bytes (standin_name
+ * in core/src/engine.c) and closes one that names nothing: never another site.
  *
  * Memory: iOS ends a packet tunnel that holds more than about 50 MB. A
  * busy connection through the engine holds up to about 140 KB (its four
@@ -111,13 +112,16 @@ enum EngineArgs {
      * so a change needs no restart. */
     static func make(port: Int, dohPort: Int, settings: AppSettings, authFile: String?,
                      blockIps: [String], fakeNet: String? = TunnelConfig.fakeNet, upstreamFile: String? = nil,
-                     fallbackFile: String? = nil) -> [String] {
+                     fallbackFile: String? = nil, httpOpen: Bool = false) -> [String] {
         let strategy = settings.strategy
         var a = ["--listen", "127.0.0.1", "--port", String(port), "--strategy", strategy.spec]
         if strategy.auto { a.append("--auto") }
         a.append("--doh")
         if dohPort > 0 { a += ["--doh-port", String(dohPort)] }
         if let authFile { a += [SocksAuth.option, authFile] }
+        // The Mac as its own proxy (AppSettings.proxyOnly): the apps' HTTP
+        // proxy requests without the password; SOCKS keeps it.
+        if httpOpen { a.append("--http-open") }
         if let fakeNet { a += ["--fake-net", fakeNet] }
         for ip in blockIps { a += ["--block-ip", ip] }
         if settings.quicOff { a.append("--drop-quic") }
@@ -127,6 +131,9 @@ enum EngineArgs {
         // The last way out (TorRoute): Tor, for a connection nothing else got
         // through; never with the user's own server, which carries everything.
         else if let fallbackFile { a += ["--fallback-file", fallbackFile] }
+        // What the remote settings add, technique tuning only
+        // (RemoteConfig.engineAllowed: never a server, a file or a port).
+        a += RemoteConfig.engineArgs(RemoteConfig.settings()["engineArgs"])
         return a
     }
 

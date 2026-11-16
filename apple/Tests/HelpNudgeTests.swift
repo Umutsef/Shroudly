@@ -34,7 +34,9 @@ final class HelpNudgeTests: XCTestCase {
         XCTAssertEqual(HelpNudge.country(remembered: nil, zone: "Asia/Tehran"), "IR")
         XCTAssertEqual(HelpNudge.country(remembered: nil, zone: "Asia/Vladivostok"), "RU")
         XCTAssertNil(HelpNudge.country(remembered: nil, zone: "Europe/Istanbul"))
-        XCTAssertEqual(HelpNudge.country(remembered: "IR", zone: "Europe/Berlin"), "IR", "a shutdown seen there wins")
+        XCTAssertEqual(HelpNudge.country(remembered: "IR", zone: "UTC"), "IR", "a shutdown seen there wins where the zone names no place")
+        XCTAssertNil(HelpNudge.country(remembered: "IR", zone: "Asia/Qatar"), "a zone of a country off the list: not the remembered one (SR-F040)")
+        XCTAssertEqual(HelpNudge.country(remembered: "RU", zone: "Asia/Tehran"), "IR", "the zone's own country comes first (SR-XM82)")
     }
 
     func testTheDesktopsNumbers() throws {
@@ -55,15 +57,15 @@ final class HelpNudgeTests: XCTestCase {
     func testKeptAcrossLaunches() throws {
         let d = try XCTUnwrap(UserDefaults(suiteName: "help-nudge-test-\(UUID().uuidString)"))
         XCTAssertNil(HelpNudge.load(d))
-        XCTAssertFalse(HelpNudge.due(d, now: 100), "not on the first day")
+        XCTAssertFalse(HelpNudge.due(d, now: 100, zone: "UTC"), "not on the first day")
         XCTAssertEqual(HelpNudge.load(d)?.next, 100 + 3 * day)
-        XCTAssertTrue(HelpNudge.due(d, now: 100 + 3 * day))
+        XCTAssertTrue(HelpNudge.due(d, now: 100 + 3 * day, zone: "UTC"))
         HelpNudge.refused(d, now: 100 + 3 * day)
         XCTAssertEqual(HelpNudge.load(d)?.refusals, 1)
-        XCTAssertFalse(HelpNudge.due(d, now: 100 + 3 * day + 6 * day))
-        XCTAssertTrue(HelpNudge.due(d, now: 100 + 10 * day))
+        XCTAssertFalse(HelpNudge.due(d, now: 100 + 3 * day + 6 * day, zone: "UTC"))
+        XCTAssertTrue(HelpNudge.due(d, now: 100 + 10 * day, zone: "UTC"))
         d.set("IR", forKey: HelpNudge.homeCountryKey)
-        XCTAssertFalse(HelpNudge.due(d, now: 100 + 10 * day))
+        XCTAssertFalse(HelpNudge.due(d, now: 100 + 10 * day, zone: "UTC"))
     }
 
     func testWhatChangedOnceAfterAnUpdate() throws {
@@ -72,18 +74,33 @@ final class HelpNudgeTests: XCTestCase {
         XCTAssertEqual(WhatsNew.decide(lastSeen: "2.6.47", current: "2.6.48", usedBefore: true), "2.6.48")
         XCTAssertNil(WhatsNew.decide(lastSeen: "2.6.48", current: "2.6.48", usedBefore: true))
         let d = try XCTUnwrap(UserDefaults(suiteName: "whats-new-test-\(UUID().uuidString)"))
-        XCTAssertEqual(WhatsNew.pending(d, current: "2.6.48", usedBefore: true), "2.6.48")
-        XCTAssertEqual(WhatsNew.pending(d, current: "2.6.48", usedBefore: true), "2.6.48", "until it is closed")
+        XCTAssertEqual(WhatsNew.pending(d, current: "2.6.48", usedBefore: true, notes: "a"), "2.6.48")
+        XCTAssertEqual(WhatsNew.pending(d, current: "2.6.48", usedBefore: true, notes: "a"), "2.6.48", "until it is closed")
         WhatsNew.seen(d)
-        XCTAssertNil(WhatsNew.pending(d, current: "2.6.48", usedBefore: true))
-        XCTAssertEqual(WhatsNew.pending(d, current: "2.6.49", usedBefore: true), "2.6.49")
+        XCTAssertNil(WhatsNew.pending(d, current: "2.6.48", usedBefore: true, notes: "a"))
+        XCTAssertEqual(WhatsNew.pending(d, current: "2.6.49", usedBefore: true, notes: "b"), "2.6.49")
+        WhatsNew.seen(d)
+        // A version whose notes were not rewritten: the old ones are not shown
+        // again under its number (2.6.65 to 2.6.70 said 2.6.64's); none, nothing.
+        XCTAssertNil(WhatsNew.pending(d, current: "2.6.50", usedBefore: true, notes: "b"), "the same notes: not again")
+        XCTAssertNil(WhatsNew.pending(d, current: "2.6.51", usedBefore: true, notes: "  "), "no notes: nothing")
+        XCTAssertEqual(WhatsNew.pending(d, current: "2.6.52", usedBefore: true, notes: "c"), "2.6.52", "new notes: shown")
         XCTAssertEqual(WhatsNew.lines(" one \n\ntwo\n"), "• one\n• two")
+        XCTAssertEqual(WhatsNew.notes("whatsNewApple", key: "whatsNewApple"), "", "the key itself: no notes")
+        XCTAssertEqual(WhatsNew.notes("", key: "whatsNewApple"), "")
+        WhatsNew.seen(d)
+        XCTAssertNil(WhatsNew.pending(d, current: "2.6.72", usedBefore: true, notes: ""), "a version with nothing new here: no window")
     }
 
     func testTheAddressSitesSee() {
         XCTAssertEqual(OwnServer.traceIp("fl=1\nh=cloudflare.com\nip=203.0.113.7\nts=1\n"), "203.0.113.7")
         XCTAssertEqual(OwnServer.traceIp("ip=2001:db8::1\r\nts=1"), "2001:db8::1")
         XCTAssertNil(OwnServer.traceIp("h=x\nvisit_scheme=https\n"))
+        // Its country (issue #60): the flag and the name in the app's language.
+        XCTAssertEqual(OwnServer.traceLoc("ip=1.2.3.4\nloc=IT\ntls=TLSv1.3\n"), "IT")
+        XCTAssertNil(OwnServer.traceLoc("loc=XX\n"))
+        XCTAssertEqual(OwnServer.withPlace("80.174.118.60", "IT", language: "en"), "80.174.118.60 · \u{1F1EE}\u{1F1F9} Italy")
+        XCTAssertEqual(OwnServer.withPlace("1.2.3.4", nil, language: "en"), "1.2.3.4")
         XCTAssertNil(OwnServer.traceIp("ip=999.1.1.1\n"))
         XCTAssertNil(OwnServer.traceIp("ip=<script>\n"))
         XCTAssertNil(OwnServer.traceIp("xip=1.2.3.4\n"))
@@ -98,5 +115,21 @@ final class HelpNudgeTests: XCTestCase {
         XCTAssertFalse(VpnErrors.missingPermission(domain: "NEVPNErrorDomain", code: 5, text: "permission denied", reading: false))
         XCTAssertFalse(VpnErrors.missingPermission(domain: "NSURLErrorDomain", code: -1001, text: "timed out", reading: true))
         XCTAssertEqual(VpnErrors.installHelp.absoluteString, "https://github.com/umutxyp/Shroudly#iphone-and-ipad")
+    }
+
+    func testNotOfferedWhereTorItselfIsBlocked() {
+        for c in ["IR", "ir", "RU", "CN", "BY", "TM", "MM"] { XCTAssertTrue(HelpNudge.torBlocked(c), c) }
+        for c in ["TR", "DE", "PK"] { XCTAssertFalse(HelpNudge.torBlocked(c), c) }
+        XCTAssertFalse(HelpNudge.torBlocked(nil))
+    }
+
+    /* A link to a home network's address, used from elsewhere (Vietnam and
+     * Turkey): "local", never a wrong guess at the password. */
+    func testAHomeNetworksAddressIsLocal() {
+        for h in ["192.168.1.102", "10.0.0.5", "172.20.1.1", "100.64.3.4", "fe80::1", "fd00::1", "[fd00::1]"] { XCTAssertTrue(OwnServer.localHost(h), h) }
+        for h in ["127.0.0.1", "::1", "8.8.8.8", "100.128.0.1", "2a00::1", "example.com", ""] { XCTAssertFalse(OwnServer.localHost(h), h) }
+        XCTAssertEqual(OwnServer.localIf("silent", host: "192.168.1.102"), "local")
+        XCTAssertEqual(OwnServer.localIf("silent", host: "203.0.113.5"), "silent")
+        XCTAssertEqual(OwnServer.whyKey("local"), "ownServerWhyLocal")
     }
 }

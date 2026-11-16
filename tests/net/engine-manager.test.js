@@ -604,6 +604,50 @@ const t = suite('engine-manager');
     t.ok(!off && on && !failed && !r.routing(),
       'M3: the administrator\'s proxy: "Not working yet" until Advanced mode is on; other proxy failures as before');
   }
+  // The same "network's own DNS" line: once in ten minutes, not once a connection.
+  {
+    const self = {};
+    const once = (m, at) => EngineManager.prototype._netdnsOnce.call(self, m, at);
+    const m = { host: 'googleapis.com', addr: '2001:4188:2:600:10:10:34:36', stage: 'bad' };
+    t.ok(once(m, 1000) && !once(m, 2000) && !once(m, 1000 + 9 * 60000), 'the same line again within ten minutes: quiet');
+    t.ok(once({ ...m, stage: 'try' }, 2000), 'another outcome: said');
+    t.ok(once(m, 1000 + 10 * 60000), 'ten minutes on: said again');
+  }
+
+  // What a server could not take (refused): kept, and given back first
+  // after a restart, before the techniques.
+  {
+    const m = {}; const written = [];
+    const self = { store: { get: (k) => m[k], set: (k, v) => { m[k] = v; } }, proc: { stdin: { write: (x) => written.push(x) } }, log: () => {},
+      _learned: () => [['clientsettingscdn.roblox.com', { s: 'split-sni', t: Date.now() - 1000 }]] };
+    Object.setPrototypeOf(self, EngineManager.prototype);
+    self._rememberAvoid('clientsettingscdn.roblox.com', 1, Date.now() - 60000);
+    self._rememberAvoid('bad host', 1);
+    self._restoreTechniques();
+    const out = written.join('');
+    t.ok(/^AVOID clientsettingscdn\.roblox\.com 1 6\d\n/.test(out) && out.indexOf('AVOID') < out.indexOf('LEARN') && !/bad host/.test(out),
+      'refused kinds are kept and given back before the techniques');
+    m.avoidTechniques2['old.example'] = { m: 1, t: Date.now() - 7 * 3600 * 1000 };
+    t.ok(!self._avoids().some(([h]) => h === 'old.example'), 'older than the engine keeps them: dropped');
+  }
+
+  {
+    // A report codeshare.me would not take the usual way: through Tor for a
+    // moment while Tor is ready, then back; never when Tor is not ready, and
+    // a name the user sends through Tor anyway stays there.
+    const m = { torSites: ['kept.example'] }; const cmds = [];
+    const self = { store: { get: (k, d) => (k in m ? m[k] : d), set: (k, v) => { m[k] = v; } }, _command: (x) => { cmds.push(x); return true; },
+      isActive: () => true, tor: { state: 'ready' } };
+    Object.setPrototypeOf(self, EngineManager.prototype);
+    let back = self.torForNow('codeshare.me');
+    back();
+    t.ok(cmds.join('|') === 'TOR codeshare.me|UNTOR codeshare.me', `a report goes through Tor for a moment, then back (${cmds.join('|')})`);
+    cmds.length = 0; back = self.torForNow('kept.example'); back();
+    t.ok(cmds.join('|') === 'TOR kept.example', 'a name the user sends through Tor stays there');
+    self.tor.state = 'starting'; cmds.length = 0;
+    t.ok(self.torForNow('codeshare.me') === null && !cmds.length, 'Tor not ready: the usual way only');
+  }
+
   console.log(`engine-manager: ${t.count} passed`);
   process.exit(0);
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

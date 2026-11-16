@@ -90,6 +90,22 @@ function serviceOf(host) {
   return null;
 }
 
+/* What the Tor question names (an Iran Telegram report: "Open
+ * 2001:4188:2:600:10:10:34:35 through Tor?", never answered, so Telegram
+ * stayed shut): an app by its name where its servers are known (Telegram for
+ * 149.154.167.92, t.me), a site by its name, a bare address only when nothing
+ * better came. A better one replaces the one asked about; a worse one never
+ * does. had, and the result: { host, rank } (rank 2 an app, 1 a name, 0 an
+ * address). appOf(host) -> the app's name or null. */
+function askLabel(had, host, appOf = (h) => { const s = serviceOf(h); return s ? s.name : null; }) {
+  const h = String(host || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  let app = null;
+  if (h) { try { app = appOf(h); } catch {} }
+  const cand = app ? { host: app, rank: 2 } : h ? { host: h, rank: v4Bytes(h) || v6Bytes(h) ? 0 : 1 } : null;
+  if (!had || !had.host) return cand || { host: '', rank: -1 };
+  return cand && cand.rank > (Number(had.rank) || 0) ? cand : had;
+}
+
 /* The IPv4 ranges of every service, as [network, mask] for a PAC's isInNet. */
 function pacRanges() {
   const out = [];
@@ -151,6 +167,15 @@ const WINDOW_MS = 5 * 60 * 1000;
 const BLOCKED_AGAIN_MS = 9 * 60 * 1000;
 const BLOCKED_WINDOW_MS = 30 * 60 * 1000;
 
+/* Addresses no app is known for, that could not be reached: at most
+ * BURST_LINES lines in BURST_MS, the rest in one line (RawWatch.kt does the
+ * same). */
+const BURST_MS = 60 * 1000;
+const BURST_LINES = 3;
+function burstLine(n, from) {
+  return `${n} more addresses that are not web connections could not be reached in the minute from ${from} (an app trying servers, most likely another VPN or proxy app); not listed one by one`;
+}
+
 class RawWatch {
   /*
    * opts.log(level, msg)
@@ -162,6 +187,12 @@ class RawWatch {
    *                              (default: assumed)
    * opts.confirm(service) -> Promise<'blocked'|'open'|'unknown'>   a
    *                              blockcheck of the service's own name
+   * opts.tor() -> 'carries'|'asks'|'off'|null   what the last way out does
+   *                              for the app's connections (engine-manager's
+   *                              torFor): Tor carries them, waits for the
+   *                              user's yes, is turned off, or is not here
+   * opts.askTor(app)             ask the user for Tor, naming the app
+   * opts.askTorAgain(app) -> bool   ask again with it turned off (true: asked)
    * opts.now()
    */
   constructor(opts = {}) {
@@ -170,6 +201,9 @@ class RawWatch {
     this.owner = opts.owner || null;
     this.networkWorks = opts.networkWorks || (() => true);
     this.confirm = opts.confirm || null;
+    this.tor = opts.tor || (() => null);
+    this.askTor = opts.askTor || (() => {});
+    this.askTorAgain = opts.askTorAgain || (() => false);
     this.now = opts.now || Date.now;
     this.recent = new Map();     // app -> { kind -> [{ addr, at }] }
     this.told = new Set();       // `${kind} ${app}` told on this network
@@ -200,6 +234,17 @@ class RawWatch {
     if (now - (this.logged.get(k) || -Infinity) < 30 * 60 * 1000) return 'quiet';
     if (this.logged.size > 500) this.logged.clear();
     this.logged.set(k, now);
+    // Many addresses at once (another VPN or proxy app trying a list of
+    // servers through Shroudly): BURST_LINES lines a minute, the rest
+    // counted and said in one line, so they do not push the log's other
+    // lines out.
+    const b = this.burst || (this.burst = { at: -Infinity, n: 0, over: 0 });
+    if (now - b.at >= BURST_MS) {
+      if (b.over > 0) this.log('info', burstLine(b.over, new Date(b.at).toISOString()));
+      b.at = now; b.n = 0; b.over = 0;
+    }
+    if (b.n >= BURST_LINES) { b.over++; return 'counted'; }
+    b.n++;
     this.log('info', line);
     return 'logged';
   }
@@ -246,6 +291,29 @@ class RawWatch {
     if (this.told.has(key)) return 'told';
     this.told.add(key);
     const list = [...addrs].slice(0, 3).join(', ');
+    const what = kind === 'unreachable'
+      ? `${app} cannot reach its servers (${list}): the network blocks those addresses themselves`
+      : `${app}: the network stops its connections (${list}) and no technique got through`;
+    // The last way out takes these connections too (the engine's
+    // via_fallback, by address): "use the app's own proxy" was wrong advice
+    // there. An Iran Telegram report: that notice, and a Tor question that
+    // named a bare address, so Tor was never allowed and Telegram stayed shut.
+    let tor = null;
+    try { tor = this.tor(); } catch {}
+    if (tor === 'carries') {
+      this.log('info', `${what}; they go through the last way out (Tor)`);
+      return 'tor';
+    }
+    if (tor === 'asks') {
+      this.log('warning', `${what}; the last way out (Tor) gets around that once allowed, asked in the window`);
+      try { this.askTor(app); } catch {}
+      return 'asked';
+    }
+    if (tor === 'off') {
+      let asked = false;
+      try { asked = !!this.askTorAgain(app); } catch {}
+      if (asked) { this.log('warning', `${what}; the last way out (Tor), turned off, would get around that: asked again in the window`); return 'asked'; }
+    }
     if (kind === 'unreachable') {
       this.log('warning', `${app} cannot reach its servers (${list}): the network blocks those addresses themselves; only the app's own proxy setting or a VPN gets around that`);
       this.tell('autoRawUnreachable', { app });
@@ -257,4 +325,4 @@ class RawWatch {
   }
 }
 
-module.exports = { SERVICES, serviceOf, pacRanges, pacRanges6, programName, inCidr, v4Bytes, v6Bytes, RawWatch, NOTICE_MIN_ADDRS, AGAIN_MS, WINDOW_MS, BLOCKED_AGAIN_MS };
+module.exports = { SERVICES, serviceOf, askLabel, pacRanges, pacRanges6, programName, inCidr, v4Bytes, v6Bytes, RawWatch, NOTICE_MIN_ADDRS, AGAIN_MS, WINDOW_MS, BLOCKED_AGAIN_MS, BURST_MS, BURST_LINES };

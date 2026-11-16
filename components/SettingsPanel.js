@@ -2,12 +2,14 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { ACCENTS, applyAppearance, readAppearance } from './Appearance';
+import { exitWithPlace } from './exitPlace';
+import { ACCENTS, LOGO_ACCENT, LOGO_GROUPS, LOGO_IDS, applyAppearance, chooseLogo, logoSrc, readAppearance, readLogoAccent, setLogoAccent, useLogo } from './Appearance';
 import {
   AlertTriangleIcon, CheckCircleIcon, CheckIcon, GlobeIcon, PaletteIcon, InfoIcon, LanguagesIcon, SearchIcon, ShieldAlertIcon,
   SpinnerIcon, XCircleIcon, ZapIcon,
 } from './icons';
 import Select from './Select';
+import { NOT_FROM } from './helpNudge';
 import { probeView } from './probeView';
 import { OWN_SERVER_ERRORS, OWN_SERVER_WHY, maskLink, serverShown, abroadHint } from './ownServerText';
 
@@ -31,6 +33,8 @@ const STRATEGIES = [
 const ADV_REASON_KEYS = {
   mac_unsupported: 'advReasonMacUnsupported',
   arch_unsupported: 'advReasonArchUnsupported',
+  // The 32-bit Shroudly on a 64-bit Windows: the 64-bit one has it.
+  wrong_build: 'advReasonWrongBuild',
   not_built: 'advReasonNotBuilt',
   windivert_missing: 'advReasonWindivertMissing',
   platform_unsupported: 'advReasonPlatformUnsupported',
@@ -48,6 +52,8 @@ const ADV_ERROR_KEYS = {
   // An antivirus refused it, or took its files (main.js securityBlocked).
   security_blocked: 'advErrorSecurity',
   files_missing: 'advReasonFilesMissing',
+  // Windows 7 without the SHA-2 update cannot check the driver's signature.
+  needs_sha2: 'advErrorNeedsSha2',
 };
 const PROBE_TIMEOUT_MS = 25000;
 
@@ -315,7 +321,7 @@ function DnsServer({ value, onSave }) {
  * come through it. Saved: what it is (never the password), and the way to
  * stop using it. */
 function OwnServer({ value, onSave }) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const descId = useId();
   const saved = typeof value === 'string' ? value : '';
   const [text, setText] = useState(saved);
@@ -332,7 +338,7 @@ function OwnServer({ value, onSave }) {
     setState({ testing: true });
     let r;
     try { r = await window.electron.testOwnServer(v); } catch { r = { ok: false, why: 'noAnswer' }; }
-    if (r && r.ok) { setState((await onSave(v)) ? { ok: true, ms: r.ms, ip: r.ip || null } : { invalid: 'format', tried: v }); return; }
+    if (r && r.ok) { setState((await onSave(v)) ? { ok: true, ms: r.ms, ip: r.ip || null, loc: r.loc || null } : { invalid: 'format', tried: v }); return; }
     setState({ ...(r || {}), tried: v });
   };
   const off = async () => { if (await onSave(null)) { setText(''); setState(null); } };
@@ -373,7 +379,7 @@ function OwnServer({ value, onSave }) {
         {state && state.ok && (
           <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-snug" style={{ color: 'var(--ok)' }}>
             <CheckCircleIcon className="mt-[1px] h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0">{state.ip ? t('ownServerOkExit', { ms: state.ms, ip: state.ip }) : t('ownServerOk', { ms: state.ms })}</span>
+            <span className="min-w-0">{state.ip ? t('ownServerOkExit', { ms: state.ms, ip: exitWithPlace(state.ip, state.loc, language) }) : t('ownServerOk', { ms: state.ms })}</span>
           </p>
         )}
         {state && (state.invalid || state.why) && (
@@ -661,8 +667,10 @@ export default function SettingsPanel({ active = false }) {
   const [allowText, setAllowText] = useState(null);  // ad blocking exceptions draft
   const [look, setLook] = useState({ accent: 'sky', surface: 'solid' });
 
-  useEffect(() => { setLook(readAppearance()); }, []);
+  const [logoAccent, setLogoAccentOn] = useState(false);
+  useEffect(() => { setLook(readAppearance()); setLogoAccentOn(readLogoAccent()); }, []);
   const setAppearance = (next) => { const v = { ...look, ...next }; setLook(v); applyAppearance(v); };
+  const logo = useLogo();
 
   // The automatic list, and when it was last built; it can change while the
   // window is open.
@@ -819,6 +827,15 @@ export default function SettingsPanel({ active = false }) {
   // the tour points at the site test (Onboarding.js).
   const tabsId = useId();
   const [tab, setTab] = useState('general');
+  // Where Tor itself is blocked the user is among those who need the help:
+  // helping others is not offered (helpNudge.js NOT_FROM, the main process
+  // does not run it there either).
+  const [helpHidden, setHelpHidden] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    window.electron?.getAppInfo?.().then((i) => { if (alive) setHelpHidden(NOT_FROM.includes(String(i?.homeCountry || '').toUpperCase())); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // started: protection was just started for this test (the window's own
   // status may not have caught up yet).
@@ -1109,6 +1126,16 @@ export default function SettingsPanel({ active = false }) {
               </button>
             </div>
           )}
+
+          {/* Advanced mode with every start of Shroudly, the one at sign-in
+              too (not only within this run, advanced-protection.js): one
+              permission prompt each time, never over a full-screen game. */}
+          {(advInfo.available || advInfo.active) && (
+            <div className="mt-3">
+              <Toggle label={t('advancedAtLaunch')} desc={t('advancedAtLaunchDesc')}
+                      checked={settings.advancedAtLaunch === true} onChange={(v) => save('advancedAtLaunch', v)} />
+            </div>
+          )}
         </Section>
 
         {/* The modes for apps that ignore the system proxy: in sight, as the
@@ -1199,25 +1226,17 @@ export default function SettingsPanel({ active = false }) {
           {settings.routeMode === 'listed' && (
             <div className="mt-3">
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="text-[12px] font-medium" style={{ color: 'var(--text-faint)' }}>{t('siteListLabel')}</span>
-                {Array.isArray(settings.siteList) && (
-                  <button type="button"
-                          onClick={() => { setSiteText(null); setBadEntries([]); save('siteList', null); setListInfo((i) => i && { ...i, custom: false }); }}
-                          className="text-[12px] underline" style={{ color: 'var(--text-dim)' }}>
-                    {t('siteListUseAuto')}
-                  </button>
-                )}
+                <span className="text-[12px] font-medium" style={{ color: 'var(--text-faint)' }}>{t('siteListOwn')}</span>
               </div>
               <p className="mb-1.5 text-[12px] leading-snug" style={{ color: 'var(--text-faint)' }}>
-                {Array.isArray(settings.siteList)
-                  ? t('siteListCustom')
-                  : t('siteListAuto', {
-                    count: (listInfo?.count || defaultList.length).toLocaleString(locale || undefined),
-                    date: listInfo?.generated ? new Date(listInfo.generated).toLocaleDateString(locale || undefined) : '—',
-                  })}
+                {t('siteListAuto', {
+                  count: (listInfo?.count || defaultList.length).toLocaleString(locale || undefined),
+                  date: listInfo?.generated ? new Date(listInfo.generated).toLocaleDateString(locale || undefined) : '—',
+                })}
+                {' '}{t('siteListCustom')}
               </p>
               <textarea
-                value={siteText == null ? (settings.siteList || defaultList).join('\n') : siteText}
+                value={siteText == null ? (settings.siteList || []).join('\n') : siteText}
                 onChange={(e) => setSiteText(e.target.value)}
                 onBlur={() => {
                   // Nothing typed: the box shows the list in use, and leaving it
@@ -1230,12 +1249,12 @@ export default function SettingsPanel({ active = false }) {
                   const list = [...new Set(entries.filter(isHostname))];
                   const dropped = [...new Set(entries.filter((d) => !isHostname(d)))];
                   setBadEntries(dropped);
-                  // Only an actual edit makes the list the user's own: merely
-                  // clicking into the box must not stop it updating itself.
-                  const current = Array.isArray(settings.siteList) ? settings.siteList : defaultList;
+                  // The box holds one's own sites only, added to the automatic
+                  // list (engine-manager.js); only an actual edit saves.
+                  const current = Array.isArray(settings.siteList) ? settings.siteList : [];
                   if (list.length === current.length && list.every((d, i) => d === current[i])) { setSiteText(null); return; }
                   setSiteText(list.join('\n'));   // show the cleaned list back
-                  save('siteList', list);
+                  save('siteList', list.length ? list : null);
                 }}
                 spellCheck={false} rows={6} dir="ltr"
                 placeholder={'discord.com\nroblox.com'}
@@ -1300,9 +1319,11 @@ export default function SettingsPanel({ active = false }) {
         <Section title={t('share')}>
           <ShareConnection onChange={(on) => setSettings((p) => ({ ...p, shareOn: on }))} />
         </Section>
+        {!helpHidden && (
         <Section title={t('snowflake')}>
           <SnowflakeHelp onChange={(on) => setSettings((p) => ({ ...p, snowflakeOn: on }))} />
         </Section>
+        )}
         </>
       )}
       {tab === 'app' && (
@@ -1366,7 +1387,9 @@ export default function SettingsPanel({ active = false }) {
                       if (!window.confirm(t('resetSettingsConfirm'))) return;
                       // The colours and Liquid glass live in the window, not in
                       // the settings file: back to a new install's too.
+                      setLogoAccent(false); setLogoAccentOn(false);
                       setAppearance({ accent: 'sky', surface: 'solid' });
+                      chooseLogo('classic', false);
                       window.electron?.resetSettings?.();
                     }}
                     className="btn btn-ghost shrink-0 rounded-[8px] px-3 py-1.5 text-[12.5px] font-semibold">{t('resetSettings')}</button>
@@ -1388,14 +1411,15 @@ export default function SettingsPanel({ active = false }) {
               narrow widths, which read as a layout accident. */}
           <div className="grid grid-cols-9 gap-1.5 sm:gap-2.5">
             {ACCENTS.map((a, i) => {
-              const on = look.accent === a.id;
+              // Following the icon: its colour is the one marked.
+              const on = (logoAccent ? (LOGO_ACCENT[logo] || 'sky') : look.accent) === a.id;
               return (
                 <button
                   key={a.id}
                   type="button"
                   aria-label={t('accentSwatch', { n: i + 1, total: ACCENTS.length })}
                   aria-pressed={on}
-                  onClick={() => setAppearance({ accent: a.id })}
+                  onClick={() => { if (logoAccent) { setLogoAccent(false); setLogoAccentOn(false); } setAppearance({ accent: a.id }); }}
                   className="swatch relative aspect-square w-full rounded-full transition-transform duration-150 hover:scale-110"
                   style={{
                     background: a.swatch,
@@ -1408,6 +1432,49 @@ export default function SettingsPanel({ active = false }) {
                 </button>
               );
             })}
+          </div>
+
+          {/* The logo: the window's corner at once, and through the main
+              process the window's icon, the taskbar and the Dock. Pictures,
+              not names: twenty-four names in thirty-one languages would say
+              less than the pictures do. */}
+          <div className="mt-4 border-t pt-3" style={{ borderColor: 'var(--line)' }}>
+            <p className="m-0 text-[13px] font-semibold" style={{ color: 'var(--text)' }}>{t('logoChoice')}</p>
+            <p className="mb-3 mt-0.5 text-[12px] leading-snug" style={{ color: 'var(--text-faint)' }}>{t('logoChoiceDesc')}</p>
+            {LOGO_GROUPS.map(([group, ids]) => (
+              <div key={group} className="mb-3 last:mb-0">
+                <p className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-faint)' }}>
+                  {t(group === 'styles' ? 'logoStyles' : group === 'days' ? 'logoDays' : 'logoCountries')}
+                </p>
+                <div className="grid grid-cols-6 gap-2 sm:grid-cols-9 sm:gap-2.5">
+                  {ids.map((id) => {
+                    const on = logo === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        aria-label={t('logoSwatch', { n: LOGO_IDS.indexOf(id) + 1, total: LOGO_IDS.length })}
+                        aria-pressed={on}
+                        onClick={() => chooseLogo(id)}
+                        className="swatch relative aspect-square w-full rounded-[22%] transition-transform duration-150 hover:scale-105"
+                        style={{ boxShadow: on ? '0 0 0 2px var(--surface), 0 0 0 4px var(--accent)' : 'none' }}
+                      >
+                        <img src={logoSrc(id)} alt="" draggable={false} className="h-full w-full select-none rounded-[22%] object-contain" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 border-t pt-3" style={{ borderColor: 'var(--line)' }}>
+            <Toggle
+              label={t('logoAccent')}
+              desc={t('logoAccentDesc')}
+              checked={logoAccent}
+              onChange={(v) => { setLogoAccent(v); setLogoAccentOn(v); }}
+            />
           </div>
 
           <div className="mt-4 border-t pt-3" style={{ borderColor: 'var(--line)' }}>

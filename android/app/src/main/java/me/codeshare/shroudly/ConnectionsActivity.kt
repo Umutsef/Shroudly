@@ -17,6 +17,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 
 /*
@@ -34,6 +35,11 @@ class ConnectionsActivity : Activity() {
     private lateinit var list: LinearLayout
     private lateinit var empty: TextView
     private lateinit var blockTyped: Button
+    private lateinit var torTyped: Button
+    private lateinit var torDesc: TextView
+    private lateinit var appsBox: LinearLayout
+    private val appSwitches = HashMap<String, Switch>()
+    private var settingApps = false
     private lateinit var search: EditText
     private var shown = true
 
@@ -54,7 +60,27 @@ class ConnectionsActivity : Activity() {
             setPadding(dp(16f), dp(16f), dp(16f), dp(16f))
         }
         root.addView(label(20f, R.color.text, true).apply { setText(R.string.connsTitle) })
-        root.addView(label(13f, R.color.text_dim).apply { setText(R.string.connsDesc); setPadding(0, dp(4f), 0, dp(12f)) })
+        root.addView(label(13f, R.color.text_dim).apply { setText(R.string.connsDesc); setPadding(0, dp(4f), 0, dp(6f)) })
+        torDesc = label(13f, R.color.text_dim).apply { setText(R.string.connsTorDesc); setPadding(0, 0, 0, dp(12f)) }
+        root.addView(torDesc)
+        // "Apps always through Tor": a whole app picked at once (its names,
+        // and its addresses for one that connects by address). A switch
+        // each: one tap on a phone, one press of the remote on a TV.
+        appsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(12f)) }
+        appsBox.addView(label(15f, R.color.text, true).apply { setText(R.string.connsTorApps) })
+        appsBox.addView(label(12f, R.color.text_dim).apply { setText(R.string.connsTorAppsDesc); setPadding(0, dp(2f), 0, dp(4f)) })
+        for (a in TorAppsList.apps) {
+            val sw = Switch(this).apply {
+                text = a.name
+                textDirection = View.TEXT_DIRECTION_LTR
+                setTextColor(getColor(R.color.text))
+                setPadding(0, dp(6f), 0, dp(6f))
+                setOnCheckedChangeListener { _, on -> if (!settingApps) { Conns.setTorApp(this@ConnectionsActivity, a.id, on); render() } }
+            }
+            appSwitches[a.id] = sw
+            appsBox.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        root.addView(appsBox)
         search = EditText(this).apply {
             setHint(R.string.connsSearch)
             isSingleLine = true
@@ -68,16 +94,21 @@ class ConnectionsActivity : Activity() {
             })
         }
         root.addView(search)
-        blockTyped = Button(this).apply {
+        blockTyped = Buttons.ghost(Button(this)).apply {
             visibility = View.GONE
             setOnClickListener { Conns.clean(search.text.toString())?.let { block(it, true); search.setText("") } }
         }
         root.addView(blockTyped, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        torTyped = Buttons.ghost(Button(this)).apply {
+            visibility = View.GONE
+            setOnClickListener { Conns.clean(search.text.toString())?.let { tor(it, true); search.setText("") } }
+        }
+        root.addView(torTyped, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         empty = label(13f, R.color.text_faint).apply { setPadding(0, dp(12f), 0, 0) }
         root.addView(empty)
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(list)
-        val scroll = ScrollView(this).apply { id = View.generateViewId(); addView(root); setBackgroundColor(getColor(R.color.bg)) }
+        val scroll = ScrollView(this).apply { id = View.generateViewId(); addView(root, WideColumn.params(this@ConnectionsActivity)); setBackgroundColor(getColor(R.color.bg)); defaultFocusHighlightEnabled = false }
         setContentView(scroll)
         Tv.rings(window)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -110,6 +141,8 @@ class ConnectionsActivity : Activity() {
         "tor" -> getString(R.string.connsRouteTor)
         "server" -> getString(R.string.connsRouteServer)
         "technique" -> getString(R.string.connsRouteTechnique)
+        // Datagrams (QUIC, games, calls): no technique works on them.
+        "udp" -> "UDP"
         else -> null
     }
 
@@ -123,6 +156,15 @@ class ConnectionsActivity : Activity() {
         render()
     }
 
+    /* Through Tor: for a site that turns the user's country away itself
+     * (Conns.setTorSite turns the last way out on; not in the lite APK). */
+    private fun torOk(): Boolean = TorRoute.bundled(this) && AppSettings.ownServer(this) == null
+
+    private fun tor(host: String, on: Boolean) {
+        Conns.setTorSite(this, host, on)
+        render()
+    }
+
     private fun render() {
         val needle = search.text.toString().trim().lowercase()
         val own = AppSettings.ownServer(this)?.host
@@ -133,11 +175,59 @@ class ConnectionsActivity : Activity() {
         val canBlock = typed != null && typed.contains('.') && typed !in blocked && Conns.rows.none { it.host == typed } && !Conns.isSystem(typed, own)
         blockTyped.visibility = if (canBlock) View.VISIBLE else View.GONE
         if (canBlock) blockTyped.text = text(R.string.connsBlockName, "host" to typed!!)
-        empty.visibility = if (rows.isEmpty() && blockedOnly.isEmpty() && !canBlock) View.VISIBLE else View.GONE
+        val torSites = Conns.torSites(this)
+        val canTor = canBlock && torOk() && torSites.none { typed == it || typed!!.endsWith(".$it") }
+        torTyped.visibility = if (canTor) View.VISIBLE else View.GONE
+        if (canTor) torTyped.text = text(R.string.connsTorName, "host" to typed!!)
+        torDesc.visibility = if (torOk()) View.VISIBLE else View.GONE
+        appsBox.visibility = if (torOk()) View.VISIBLE else View.GONE
+        val picked = Conns.torApps(this)
+        settingApps = true
+        for ((id, sw) in appSwitches) if (sw.isChecked != (id in picked)) sw.isChecked = id in picked
+        settingApps = false
+        appNames = Conns.appEntries(picked).filter { !it.contains('/') }.toSet()
+        val torOnly = torSites.filter { t -> Conns.rows.none { it.host == t } && (needle.isEmpty() || t.contains(needle)) }.sorted()
+        empty.visibility = if (rows.isEmpty() && blockedOnly.isEmpty() && torOnly.isEmpty() && !canBlock) View.VISIBLE else View.GONE
         empty.setText(if (Protection.state == Protection.State.ON) R.string.connsEmpty else R.string.statsInactiveHint)
         list.removeAllViews()
-        for (r in rows) list.addView(row(r.host, meta(r, own), r.blocked, Conns.isSystem(r.host, own)))
-        for (b in blockedOnly) list.addView(row(b, getString(R.string.connsBlocked), true, Conns.isSystem(b, own)))
+        for (r in rows) list.addView(row(r.host, meta(r, own), r.blocked, Conns.isSystem(r.host, own), viaTor(r.host, torSites), viaTor(r.host, appNames) != null))
+        for (b in blockedOnly) list.addView(row(b, getString(R.string.connsBlocked), true, Conns.isSystem(b, own), null))
+        for (t in torOnly) list.addView(row(t, getString(R.string.connsTorChosen), false, false, t))
+        // What the ad list stopped, with a button to let one through: a page
+        // that "does not open" with protection on is often a name the list
+        // blocks whole (a link shortener's, SR-G563).
+        val allowed = AdBlock.allow(this)
+        val ads = if (AdBlock.enabled(this)) Conns.ads.filter { a ->
+            (needle.isEmpty() || a.host.contains(needle)) && allowed.none { a.host == it || a.host.endsWith(".$it") }
+        }.take(30) else emptyList()
+        if (ads.isNotEmpty()) {
+            list.addView(label(15f, R.color.text, true).apply { setText(R.string.connsAdsTitle); setPadding(0, dp(16f), 0, dp(2f)) })
+            list.addView(label(12f, R.color.text_dim).apply { setText(R.string.connsAdsDesc); setPadding(0, 0, 0, dp(4f)) })
+            for (a in ads) list.addView(adRow(a))
+        }
+    }
+
+    private fun adRow(a: Conns.AdRow): View {
+        val r = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10f), 0, dp(10f))
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(label(15f, R.color.text).apply { text = a.host; textDirection = View.TEXT_DIRECTION_LTR; isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.MIDDLE })
+        val sub = text(R.string.connsAdStopped, "count" to a.count)
+        texts.addView(label(12f, R.color.text_faint).apply { text = sub })
+        r.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        r.addView(Buttons.ghost(Button(this)).apply {
+            setText(R.string.connsAdAllow)
+            setOnClickListener {
+                AdBlock.setAllow(this@ConnectionsActivity, (AdBlock.allow(this@ConnectionsActivity) + a.host).joinToString("\n"))
+                Protector.tell(this@ConnectionsActivity, ShroudlyVpnService.ACTION_ADBLOCK)
+                Conns.adAllowed(a.host)
+                render()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8f) })
+        return r
     }
 
     private fun meta(r: Conns.Row, own: String?): String {
@@ -146,10 +236,17 @@ class ConnectionsActivity : Activity() {
         if (r.active > 0) parts += text(R.string.connsOpen, "count" to r.active)
         route(r)?.let { parts += it }
         if (Conns.isSystem(r.host, own)) parts += getString(R.string.connsSystem)
+        if (r.route != "tor" && (viaTor(r.host, Conns.torSites(this)) != null || viaTor(r.host, appNames) != null)) parts += getString(R.string.connsTorChosen)
         return parts.joinToString(" · ")
     }
 
-    private fun row(host: String, sub: String, blocked: Boolean, system: Boolean): View {
+    /* The listed name that sends this one through Tor (itself or one above it). */
+    private fun viaTor(host: String, sites: Set<String>): String? = sites.firstOrNull { host == it || host.endsWith(".$it") }
+
+    // The names of the apps picked (their switches decide those).
+    private var appNames: Set<String> = emptySet()
+
+    private fun row(host: String, sub: String, blocked: Boolean, system: Boolean, torBy: String?, byApp: Boolean = false): View {
         val r = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -159,11 +256,20 @@ class ConnectionsActivity : Activity() {
         texts.addView(label(15f, R.color.text).apply { text = host; textDirection = View.TEXT_DIRECTION_LTR; isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.MIDDLE })
         texts.addView(label(12f, if (blocked) R.color.warn else R.color.text_faint).apply { text = sub })
         r.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        // Through Tor, or back the usual way (never for Shroudly's own names).
+        // A name an app picked sends there: that app's switch brings it back.
+        val gap = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8f) }
+        if (!blocked && !system && torOk() && !(byApp && torBy == null)) r.addView(Buttons.ghost(Button(this)).apply {
+            setText(if (torBy != null) R.string.connsTorBack else R.string.connsTor)
+            if (torBy != null) setTextColor(Accent.color(this@ConnectionsActivity, R.attr.accentLight))
+            setOnClickListener { if (torBy != null) tor(torBy, false) else tor(host, true) }
+        }, gap)
         // Shroudly's own names: Allow if one was blocked before, never Block.
-        if (blocked || !system) r.addView(Button(this).apply {
+        if (blocked || !system) r.addView(Buttons.ghost(Button(this)).apply {
             setText(if (blocked) R.string.connsAllow else R.string.connsBlock)
+            if (!blocked) setTextColor(getColor(R.color.danger))
             setOnClickListener { block(host, !blocked) }
-        })
+        }, LinearLayout.LayoutParams(gap))
         return r
     }
 }

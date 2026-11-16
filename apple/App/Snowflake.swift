@@ -34,7 +34,8 @@ final class Snowflake: NSObject, ObservableObject, WKScriptMessageHandler {
     private var web: WKWebView?
     private var rules: WKContentRuleList?
 
-    var enabled: Bool { UserDefaults.standard.bool(forKey: Self.key) }
+    // Nor where Tor itself is blocked (HelpNudge.torBlockedHere).
+    var enabled: Bool { UserDefaults.standard.bool(forKey: Self.key) && !HelpNudge.torBlockedHere() }
 
     /* The desktop's pageConfig (electron/snowflake.js). */
     private func config() -> [String: Any] {
@@ -57,7 +58,8 @@ final class Snowflake: NSObject, ObservableObject, WKScriptMessageHandler {
 
     /* Running exactly while it is on and the app may run it. */
     func sync(active: Bool) {
-        if enabled && active { start() } else { stop() }
+        // Never in the store copy, whatever was set before (Distribution).
+        if Distribution.snowflake && enabled && active { start() } else { stop() }
     }
 
     private func start() {

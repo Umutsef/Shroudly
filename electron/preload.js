@@ -13,12 +13,15 @@ contextBridge.exposeInMainWorld('electron', {
   repairApp: () => ipcRenderer.invoke('app:repair'),
   // The Connections list (issue #74).
   getConnections: () => ipcRenderer.invoke('conns:list'),
+  allowAdName: (host) => ipcRenderer.invoke('adblock:allow', host),
   // The last way out: Tor here yet, and fetching it now (issue #75).
   getTorStatus: () => ipcRenderer.invoke('tor:status'),
   prepareTor: () => ipcRenderer.invoke('tor:prepare'),
   // A site needs Tor: the user's yes (true) or no (false) (issue #77).
   answerTor: (yes) => ipcRenderer.invoke('tor:answer', yes === true),
   setBlocked: (host, on) => ipcRenderer.invoke('conns:block', host, on),
+  setTorSite: (host, on) => ipcRenderer.invoke('conns:tor', host, on),
+  setTorApp: (id, on) => ipcRenderer.invoke('conns:torApp', id, on),
   // Where Shroudly keeps its data (data-dir.js, issue #72).
   getDataDir: () => ipcRenderer.invoke('datadir:get'),
   pickDataDir: () => ipcRenderer.invoke('datadir:pick'),
@@ -82,6 +85,12 @@ contextBridge.exposeInMainWorld('electron', {
   // A short text the user asked to copy (an account number).
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   saveLogs: () => ipcRenderer.invoke('logs:save'),
+  // "Something not working?" (ReportDialog): past references and whether
+  // one may go now; send one (what the user wrote; the log is added there).
+  reportInfo: () => ipcRenderer.invoke('report:info'),
+  reportOffered: () => ipcRenderer.invoke('report:offered'),
+  onReportOffered: (cb) => { const h = (e, on) => cb(on); ipcRenderer.on('report:offered', h); return () => ipcRenderer.removeListener('report:offered', h); },
+  sendReport: (fields) => ipcRenderer.invoke('report:send', fields),
   // Windows: the leftover WinHTTP proxy cleared (Windows asks for an
   // administrator).
   clearWinHttp: () => ipcRenderer.invoke('winhttp:clear'),

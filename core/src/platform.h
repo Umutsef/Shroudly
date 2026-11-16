@@ -76,6 +76,11 @@ int  sock_set_nonblock(sock_t s, int on);
 int  sock_set_timeouts(sock_t s, int ms);
 int  sock_get_ttl(sock_t s, int family);
 int  sock_set_ttl(sock_t s, int family, int ttl);
+/* How much of what was sent on s the far end has not acknowledged yet, as
+ * the system counts it (bytes, or segments: only zero or not matters); -1
+ * where the system does not say. Data nobody acknowledges seconds after it
+ * went out never arrived: something on the way took it. */
+int  sock_unacked(sock_t s);
 /* Wait until the kernel has transmitted everything queued on s (best effort, max_ms). */
 void sock_wait_sent(sock_t s, int max_ms);
 /* Connect with timeout. Returns 0 on success, -2 when timeout_ms ran out with
@@ -93,7 +98,7 @@ int  sock_wait_either(sock_t a, sock_t b, int timeout_ms);
 /* Poll up to SOCK_POLL_MAX sockets for readability. ready[i] is set to 1 for
  * each one that is readable, closed or in error (a read then says which), else
  * 0. Returns how many are ready, 0 on timeout, -1 on error. */
-#define SOCK_POLL_MAX 16
+#define SOCK_POLL_MAX 32
 int  sock_wait_any(const sock_t *s, int n, int timeout_ms, int *ready);
 /* Connecting to several addresses side by side. sock_connect_start begins a
  * connect without waiting for it: 0 connected at once, 1 under way (the socket

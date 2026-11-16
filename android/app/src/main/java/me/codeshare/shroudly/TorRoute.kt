@@ -28,6 +28,17 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
     companion object {
         private const val STALL_MS = 90_000L
         private const val IDLE_MS = 15 * 60_000L
+        /* Protection off: Tor is kept this long, so a quick Stop and Start
+         * goes on with the Tor that took minutes to get through (an Iranian
+         * report: a restart put it back at 10%). */
+        const val LINGER_MS = 5 * 60_000L
+
+        /* One Tor for the app, whichever service runs protection (the VPN
+         * or proxy only), and kept past a service that stopped (linger). */
+        @Volatile private var one: TorRoute? = null
+        fun shared(ctx: Context): TorRoute = synchronized(this) {
+            one ?: TorRoute(ctx.applicationContext, { ShroudlyVpnService.log(it) }) { Protection.changed() }.also { one = it }
+        }
         private const val RETRY_MS = 10 * 60_000L
         private const val FILE = "tor-route.txt"
         private val TRANSPORTS = listOf("snowflake", "meek", "obfs4", "webtunnel")
@@ -51,8 +62,33 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
         fun withPeers(line: String): String =
             if (line.startsWith("snowflake ") && !Regex(" max=\\d+").containsMatchIn(line)) "$line max=$SNOWFLAKE_PEERS" else line
 
+        /* The country's bridges (the Tor Project's circumvention settings,
+         * through shroudly.codeshare.me/v1/bridges) first, then the
+         * bundle's: as the desktop (tor-route.js mergeBridges). Pure. */
+        private val COUNTRY_ORDER = listOf("webtunnel", "obfs4", "snowflake", "meek")
+        fun mergeBridges(country: Map<String, List<String>>?, bundled: Map<String, List<String>>): Map<String, List<String>> {
+            val out = LinkedHashMap<String, List<String>>()
+            for (k in COUNTRY_ORDER) {
+                val theirs = (country?.get(k) ?: emptyList()).filter { it.startsWith("$k ") && it.length < 2000 && !it.contains('\n') && !it.contains('\r') }.take(8)
+                val all = (theirs + (bundled[k] ?: emptyList())).distinct()
+                if (all.isNotEmpty()) out[k] = all
+            }
+            return out
+        }
+
+        /* {"country": "RU", "bridges": {"webtunnel": [...], ...}}: the bridges. */
+        fun countryBridgesOf(json: String): Map<String, List<String>> = try {
+            val b = org.json.JSONObject(json).optJSONObject("bridges")
+            val out = HashMap<String, List<String>>()
+            if (b != null) for (k in COUNTRY_ORDER) {
+                val a = b.optJSONArray(k) ?: continue
+                out[k] = (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() }
+            }
+            out
+        } catch (_: Exception) { emptyMap() }
+
         fun torrc(port: Int, dataDir: String, lyrebird: String, bridges: Map<String, List<String>>, stage: String, ownerPid: Int): String {
-            val kinds = if (stage == "snowflake") listOf("snowflake") else TRANSPORTS
+            val kinds = when (stage) { "snowflake" -> listOf("snowflake"); "country" -> COUNTRY_ORDER; else -> TRANSPORTS }
             val lines = kinds.flatMap { bridges[it] ?: emptyList() }.map(::withPeers)
             val transports = lines.map { it.substringBefore(' ') }.distinct()
             return (listOf(
@@ -79,6 +115,12 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
         fun setApproved(ctx: Context, yes: Boolean) =
             ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("torApproved", yes).apply()
 
+        /* Tor is in this copy of the app (not in the lite APK). */
+        fun bundled(ctx: Context): Boolean {
+            val lib = File(ctx.applicationInfo.nativeLibraryDir)
+            return File(lib, "libtor.so").exists() && File(lib, "liblyrebird.so").exists()
+        }
+
         /* What the window shows: off, starting, ready, failed. */
         @Volatile var state = "off"
             private set
@@ -95,11 +137,19 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
     private var gen = 0
     private var port = 0
     private var stage = "snowflake"
+    /* The bridges the Tor Project gives out for this country: the bundle's
+     * are all blocked in Russia, where Tor never got through; Tor Browser
+     * gets these there. Asked once the bundle's did not get through (kept
+     * six hours); once they have, the next start goes to them at once. */
+    private var country: Map<String, List<String>>? = null
+    private var countryAt = 0L
+    private var countryWorked = false
     private var failedAt = 0L
     private var used = 0L
     private var usedAt = 0L
     private var stall: ScheduledFuture<*>? = null
     private var idle: ScheduledFuture<*>? = null
+    private var linger: ScheduledFuture<*>? = null
 
     fun available() = tor.exists() && lyrebird.exists()
 
@@ -107,21 +157,31 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
      * Tor starts later, when first needed. null where this build has none. */
     fun portFile(): File? {
         if (!available()) return null
-        synchronized(lock) { if (port == 0) port = Engine.freePort() }
+        // A Tor kept from a moment ago goes on, on the same port.
+        synchronized(lock) { linger?.cancel(false); linger = null; if (port == 0) port = Engine.freePort() }
         return File(ctx.filesDir, FILE).also { it.writeText("socks5://127.0.0.1:$port\n") }
     }
 
     /* The engine had a connection for it and nothing was listening. */
     fun need() = synchronized(lock) {
         if (proc != null || port == 0 || !available()) return@synchronized
+        // Turned off by the remote settings (a Tor that fails everywhere, say).
+        if (RemoteConfig.settings(ctx).optBoolean("torAllowed", true) == false) {
+            if (!remoteOffSaid) { remoteOffSaid = true; log("The last way out is turned off for now by the remote settings") }
+            return@synchronized
+        }
+        remoteOffSaid = false
         if (state == "failed" && System.currentTimeMillis() - failedAt < RETRY_MS) return@synchronized
-        start("snowflake")
+        start(if (countryWorked && country != null) "country" else "snowflake")
     }
 
     private fun start(s: String) {
         kill()
         val g = ++gen
-        val bridges = try { bridgesOf(ctx.assets.open("tor/pt_config.json").bufferedReader().use { it.readText() }) } catch (_: Exception) { emptyMap() }
+        val bundled = try { bridgesOf(ctx.assets.open("tor/pt_config.json").bufferedReader().use { it.readText() }) } catch (_: Exception) { emptyMap() }
+        val base = if (s == "country") mergeBridges(country, bundled) else bundled
+        // Bridges the remote settings name come first (RemoteConfig).
+        val bridges = mergeBridges(RemoteConfig.torBridges(RemoteConfig.settings(ctx)), base)
         stage = if (s == "snowflake" && bridges["snowflake"] == null) "all" else s
         val data = File(ctx.filesDir, "tor").apply { mkdirs(); setReadable(false, false); setReadable(true, true); setExecutable(false, false); setExecutable(true, true); setWritable(false, false); setWritable(true, true) }
         val rc = File(ctx.filesDir, "torrc").apply { writeText(torrc(port, data.path, lyrebird.path, bridges, stage, android.os.Process.myPid())) }
@@ -133,9 +193,13 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
                 .start()
         } catch (e: Exception) { fail("Tor could not start: ${e.message}"); return }
         proc = p
+        said = 0
         state = "starting"; progress = 0
-        log(if (stage == "snowflake") "The last way out: starting Tor through Snowflake, for sites nothing else opened"
-            else "The last way out: Snowflake did not get through; trying Tor's other ways (meek, obfs4) with it")
+        log(when (stage) {
+            "snowflake" -> "The last way out: starting Tor through Snowflake, for sites nothing else opened"
+            "country" -> "The last way out: Tor through the bridges the Tor Project gives for this country (${bridges.keys.joinToString(", ")})"
+            else -> "The last way out: Snowflake did not get through; trying Tor's other ways (meek, obfs4) with it"
+        })
         onChange()
         Thread({
             try { p.inputStream.bufferedReader().forEachLine { line(it, g) } } catch (_: Exception) {}
@@ -145,8 +209,17 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
         armStall(g)
     }
 
+    // Tor's own warnings and errors said in the log, a few a start: "Tor
+    // ended (1)" alone said nothing of why (2.6.80, Tor 16.0.1 on phones).
+    private var said = 0
+    private var remoteOffSaid = false
+
     private fun line(l: String, g: Int) = synchronized(lock) {
         if (g != gen) return@synchronized
+        if ((l.contains("[err]") || l.contains("[warn]")) && said < 8) {
+            said++
+            log("Tor: " + l.substringAfter("] ").take(240))
+        }
         val m = Regex("Bootstrapped (\\d+)%").find(l)
         if (m != null) {
             val pct = m.groupValues[1].toInt()
@@ -158,7 +231,12 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
                     stall?.cancel(false)
                     usedAt = System.currentTimeMillis()
                     armIdle()
-                    log("The last way out is ready: Tor through ${if (stage == "snowflake") "Snowflake" else "its bridges"}")
+                    if (stage == "country") countryWorked = true
+                    log("The last way out is ready: Tor through ${when (stage) { "snowflake" -> "Snowflake"; "country" -> "this country's bridges"; else -> "its bridges" }}")
+                    // What the user sends through Tor and opened while it
+                    // started: connected again, through it (a browser keeps a
+                    // connection made the usual way for minutes).
+                    if (Conns.torEntries(ctx).isNotEmpty()) Protector.tell(ctx, ShroudlyVpnService.ACTION_CONNS, Conns.TOR_AGAIN)
                 }
                 onChange()
             }
@@ -173,9 +251,35 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
         stall = timers.schedule({
             synchronized(lock) {
                 if (g != gen || state != "starting") return@synchronized
-                if (stage == "snowflake") start("all") else fail("Tor did not get through ($progress%)")
+                when (stage) {
+                    "snowflake" -> start("all")
+                    "all" -> tryCountry(g)
+                    else -> { countryWorked = false; fail("Tor did not get through ($progress%)") }
+                }
             }
         }, STALL_MS, TimeUnit.MILLISECONDS)
+    }
+
+    /* The bundle's bridges did not get through: the country's, asked now
+     * through the engine (off the lock: it is a request), and Tor again with
+     * them. None to be had: failed as before. */
+    private fun tryCountry(g: Int) {
+        val pct = progress
+        val fresh = country != null && System.currentTimeMillis() - countryAt < 6 * 3600 * 1000L
+        Thread({
+            if (!fresh) {
+                val got = try {
+                    val req = ("GET /v1/bridges HTTP/1.1\r\nHost: ${OnlineHttp.HOST}\r\nConnection: close\r\n" +
+                        "User-Agent: Shroudly/${BuildConfig.VERSION_NAME} (Android)\r\nAccept-Encoding: identity\r\n\r\n").toByteArray(Charsets.ISO_8859_1)
+                    OnlineHttp.post(Protection.socksPort, Protection.socksAuth, req, 20_000)?.let { countryBridgesOf(it) }
+                } catch (_: Exception) { null }
+                synchronized(lock) { if (got != null && got.isNotEmpty()) { country = got; countryAt = System.currentTimeMillis() } }
+            }
+            synchronized(lock) {
+                if (g != gen || state != "starting") return@synchronized
+                if (mergeBridges(country, emptyMap()).isEmpty()) fail("Tor did not get through ($pct%)") else start("country")
+            }
+        }, "tor-country").apply { isDaemon = true }.start()
     }
 
     /* The engine's count of connections it carried (its stats line). */
@@ -220,8 +324,22 @@ class TorRoute(private val ctx: Context, private val log: (String) -> Unit, priv
     }
 
     /* With protection: Tor too. The port is kept for the next start. */
-    fun stop() = synchronized(lock) { stopLocked() }
+    fun stop() = synchronized(lock) { linger?.cancel(false); linger = null; stopLocked() }
 
-    /* The service is gone for good. */
-    fun close() { stop(); timers.shutdownNow() }
+    /* Protection off: Tor stopped in LINGER_MS unless protection starts
+     * again first (portFile). One not running, or failed, stops at once. */
+    fun linger() = synchronized(lock) {
+        if (proc == null || state == "off" || state == "failed") { stopLocked(); return@synchronized }
+        linger?.cancel(false)
+        linger = timers.schedule({
+            synchronized(lock) {
+                linger = null
+                if (proc != null) log("The last way out: protection stayed off; Tor stopped")
+                stopLocked()
+            }
+        }, LINGER_MS, TimeUnit.MILLISECONDS)
+    }
+
+    /* The service is gone: Tor lingers a moment (one Tor for the app). */
+    fun close() = linger()
 }

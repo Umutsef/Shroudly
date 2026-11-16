@@ -48,8 +48,6 @@
  * budget, not this count, is what bounds a connection. */
 #define ATT_MAX         (STRATEGY_MAX_PRESETS + 2)
 #define ATT_BUDGET_MS   15000
-/* The same for another name of a site the last way out carries (fb_site_is). */
-#define ATT_BUDGET_FB_MS 6000
 /* An attempt given less than this to be answered is not an attempt: it is not
  * started, and not counted. */
 #define ATT_MIN_WAIT_MS  500
@@ -73,9 +71,39 @@
  * first, held between these bounds. A silent network pays at most this. */
 #define RACE_HEAD_MIN_MS 250
 #define RACE_HEAD_MAX_MS 1000
-/* A ladder keeps at most this many connections open. Past it, the oldest
+/* A ladder keeps at most LEG_OPEN connections open (LEG_MAX while it goes
+ * through the rest of its list at once, see BURST_BATCH). Past it, the oldest
  * technique's goes; the untouched request's never does (see legs_add). */
-#define LEG_MAX 6
+#define LEG_OPEN 6
+#define LEG_MAX  24
+/* On a network that drops without a word every attempt costs its whole wait,
+ * so a ladder that took them one by one got through the untouched request
+ * and four techniques in its 15 seconds, and no further. Once two attempts
+ * have gone unanswered with nothing refused, the rest of the list goes out
+ * BURST_BATCH at a time, each batch given one wait: every technique has had
+ * its turn by about the time the old ladder gave up. That matters twice.
+ * The technique that opens a site may come late in the list (Türk Telekom,
+ * Turkcell Superonline): it is found on the first visit, not the third. And
+ * the last way out is for a name every technique failed on, never for one a
+ * ladder merely ran out of time on: from 2.6.54 to 2.6.74 a ladder's time
+ * running out was enough, the name went to Tor and the search stopped there,
+ * so on such networks sites lived on Tor, slowly, that a technique opens
+ * ("it worked in the old version"). LEG_MAX holds the whole list beside the
+ * untouched request, so no connection has to go while the ladder runs: a
+ * technique whose answer comes seconds late (a slow path) is still the one
+ * that opens the site. ATT_BUDGET_ALL_MS: the most a ladder that does this
+ * may take in all. */
+#define BURST_BATCH        7
+#define BURST_SITE         10   /* a name whose site the last way out carries: two batches */
+#define BURST_GAP_MS       40
+#define ATT_BUDGET_ALL_MS  24000
+/* The first attempt's wait is long, for a server that is slow. But when
+ * what it sent is still unacknowledged this long after it went out (and
+ * three round trips), nobody is being slow: the network took it (see
+ * legs_unheard), and the rest of the list goes out at once instead of after
+ * the whole wait. The connection stays open all the same. */
+#define UNHEARD_MS         1200
+#define UNHEARD_MAX_MS     3000
 /* After the ladder is over with nothing answered, its connections are still
  * listened to for this long; then the oldest is simply relayed. */
 #define RACE_MAX_MS 30000
@@ -89,8 +117,11 @@
  * answers — a dead server, a black-holed tracker its app retries all day —
  * would otherwise cost up to five more per connection made to it. A ladder
  * that finds no room listens to what it has open until there is (see
- * wait_room). Enough for a dozen silent ladders in full at once. */
-#define EXTRA_LEGS_MAX 48
+ * wait_room). Enough for nine silent ladders going through the rest of
+ * their lists at once (BURST_BATCH); a name that came to nothing keeps to
+ * two connections for a while after (COOL_MS), so this is not what an
+ * endpoint retried all day costs. */
+#define EXTRA_LEGS_MAX 128
 /* A host whose last ladder came to nothing (nothing answered) in this long
  * keeps at most LEG_COOL_MAX connections open on its next ladders: the
  * untouched request and the newest technique. The search goes on at the same
@@ -241,13 +272,48 @@ static const char *const PUBLIC_2LD[] = {
   NULL
 };
 
+/* One service under several registrable domains: what its first name
+ * teaches is kept for all of them, under the first domain listed. Discord
+ * opens discord.com, gateway.discord.gg, cdn.discordapp.com,
+ * media.discordapp.net and discord.media one after another, and each paid a
+ * ladder of its own on first contact while the app's loading screen waited.
+ * Only one owner's domains for one product, filtered alike; a name's own
+ * entry still wins, and a technique that fails there is let go
+ * (hs_unlearn). */
+static const char *const SITE_FAMILY[][8] = {
+  { "discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media", "discordcdn.com", "discord.co", NULL },
+  { "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "ggpht.com", "youtube-nocookie.com", NULL },
+  { "x.com", "twitter.com", "twimg.com", "t.co", NULL },
+  { "instagram.com", "cdninstagram.com", NULL },
+  { "facebook.com", "fbcdn.net", "fb.com", "fbsbx.com", "messenger.com", NULL },
+  { "whatsapp.com", "whatsapp.net", NULL },
+  { "telegram.org", "t.me", "telegram.me", "telesco.pe", "tdesktop.com", "telegra.ph", NULL },
+  { "roblox.com", "rbxcdn.com", "rbx.com", NULL },
+  { "riotgames.com", "leagueoflegends.com", "pvp.net", "riotcdn.net", "playvalorant.com", "lolstatic.com", NULL },
+  { "twitch.tv", "ttvnw.net", "jtvnw.net", NULL },
+  { "spotify.com", "scdn.co", "spotifycdn.com", NULL },
+  { "reddit.com", "redd.it", "redditmedia.com", "redditstatic.com", NULL },
+  { "tiktok.com", "tiktokcdn.com", "tiktokv.com", NULL },
+  { "signal.org", "whispersystems.org", NULL },
+  { NULL }
+};
+
+/* The family's first domain for site, or site itself. */
+static const char *site_family(const char *site) {
+  for (int f = 0; SITE_FAMILY[f][0]; f++)
+    for (int i = 0; SITE_FAMILY[f][i]; i++)
+      if (strcmp(site, SITE_FAMILY[f][i]) == 0) return SITE_FAMILY[f][0];
+  return site;
+}
+
 /* h (n characters) is suf, or ends in "." + suf. */
 static int under(const char *h, size_t n, const char *suf) {
   size_t m = strlen(suf);
   return n >= m && strcmp(h + n - m, suf) == 0 && (n == m || h[n - m - 1] == '.');
 }
 
-static int site_of(const char *h, char *out, size_t cap) {
+/* The registrable domain alone, without SITE_FAMILY (see site_of). */
+static int site_reg(const char *h, char *out, size_t cap) {
   char low[256];
   size_t n = 0;
   out[0] = 0;
@@ -286,6 +352,18 @@ static int site_of(const char *h, char *out, size_t cap) {
   return 1;
 }
 
+/* The site a technique is shared across: the registrable domain, or its
+ * service's first domain (SITE_FAMILY). */
+static int site_of(const char *h, char *out, size_t cap) {
+  if (!site_reg(h, out, cap)) return 0;
+  const char *fam = site_family(out);
+  if (fam != out) {
+    if (strlen(fam) + 1 > cap) return 0;
+    memmove(out, fam, strlen(fam) + 1);
+  }
+  return 1;
+}
+
 /* The site to keep alongside h, if it is not h itself. */
 static int site_key(const char *h, char *out, size_t cap) {
   return site_of(h, out, cap) && strcmp(out, h) != 0;
@@ -307,8 +385,12 @@ static uint64_t age_ms(uint64_t now, uint64_t t);
 static struct { char site[256]; uint64_t t; } g_ok[OK_SLOTS];
 static mutex_t g_ok_mx;
 
+/* By the registrable domain, never SITE_FAMILY: a service's other domains
+ * are often other addresses (i.ytimg.com, googlevideo.com beside
+ * youtube.com), which a network blocks on their own (issue #79). Their
+ * failing while youtube.com works is still a block, told as one. */
 static void ok_key(const char *h, char *out, size_t cap) {
-  if (!site_of(h, out, cap)) { strncpy(out, h, cap - 1); out[cap - 1] = 0; }
+  if (!site_reg(h, out, cap)) { strncpy(out, h, cap - 1); out[cap - 1] = 0; }
 }
 
 static void ok_put(const char *h) {
@@ -361,6 +443,82 @@ static void cool_put(const char *h) {
   mutex_unlock(&g_cool_mx);
 }
 
+/* ── names every technique failed on ─────────────────────────────────────
+ * The last way out takes a name over only from a ladder that tried its whole
+ * list (see BURST_BATCH). For EX_MS after one that did, the name's next
+ * ladders keep to two connections, as a name that rests does (COOL_MS: what
+ * failed whole a moment ago is not sent twenty connections each time an app
+ * tries again), and may hand it over without getting through the list again. Anything
+ * answering for the name ends it (cool_drop). */
+#define EX_SLOTS 128
+#define EX_MS    (15 * 60 * 1000)
+static struct { char host[256]; uint64_t t; } g_ex[EX_SLOTS];
+
+static void ex_put(const char *h) {
+  if (!h[0] || strlen(h) >= sizeof(g_ex[0].host)) return;
+  mutex_lock(&g_cool_mx);
+  int slot = 0;
+  for (int i = 0; i < EX_SLOTS; i++) {
+    if (g_ex[i].host[0] && strcmp(g_ex[i].host, h) == 0) { slot = i; break; }
+    if (g_ex[i].t < g_ex[slot].t) slot = i;   /* else the oldest (or an empty one) */
+  }
+  snprintf(g_ex[slot].host, sizeof(g_ex[slot].host), "%s", h);
+  g_ex[slot].t = now_ms();
+  mutex_unlock(&g_cool_mx);
+}
+
+static int ex_recent(const char *h) {
+  int yes = 0;
+  mutex_lock(&g_cool_mx);
+  uint64_t now = now_ms();
+  for (int i = 0; i < EX_SLOTS; i++)
+    if (g_ex[i].host[0] && strcmp(g_ex[i].host, h) == 0) { yes = age_ms(now, g_ex[i].t) < EX_MS; break; }
+  mutex_unlock(&g_cool_mx);
+  return yes;
+}
+
+/* One connection goes through the rest of the list for a name (BURST_BATCH);
+ * a browser opens several to a site at once, and the others wait for what
+ * that one finds instead of each sending the server twenty handshakes
+ * (burst_take: 1 for the one that does it; burst_on: someone is). */
+#define BURST_SLOTS 32
+static struct { char host[256]; } g_burst[BURST_SLOTS];
+
+static int burst_take(const char *h) {
+  int slot = -1, got = 0;
+  if (!h[0] || strlen(h) >= sizeof(g_burst[0].host)) return 1;
+  mutex_lock(&g_cool_mx);
+  for (int i = 0; i < BURST_SLOTS; i++) {
+    if (g_burst[i].host[0] && strcmp(g_burst[i].host, h) == 0) { slot = -2; break; }
+    if (!g_burst[i].host[0] && slot == -1) slot = i;
+  }
+  if (slot >= 0) { snprintf(g_burst[slot].host, sizeof(g_burst[slot].host), "%s", h); got = 1; }
+  mutex_unlock(&g_cool_mx);
+  /* No slot left: it does its own, rather than wait for nobody. */
+  return got || slot == -1;
+}
+
+static int burst_on(const char *h) {
+  int yes = 0;
+  mutex_lock(&g_cool_mx);
+  for (int i = 0; i < BURST_SLOTS && !yes; i++) yes = g_burst[i].host[0] && strcmp(g_burst[i].host, h) == 0;
+  mutex_unlock(&g_cool_mx);
+  return yes;
+}
+
+static void burst_give(const char *h) {
+  mutex_lock(&g_cool_mx);
+  for (int i = 0; i < BURST_SLOTS; i++)
+    if (g_burst[i].host[0] && strcmp(g_burst[i].host, h) == 0) { g_burst[i].host[0] = 0; break; }
+  mutex_unlock(&g_cool_mx);
+}
+
+static void ex_forget(void) {
+  mutex_lock(&g_cool_mx);
+  memset(g_ex, 0, sizeof(g_ex));
+  mutex_unlock(&g_cool_mx);
+}
+
 static int cool_is(const char *h) {
   int yes = 0;
   mutex_lock(&g_cool_mx);
@@ -373,12 +531,16 @@ static int cool_is(const char *h) {
 
 /* ── names the last way out carries ──────────────────────────────────────
  * A name that nothing but the last way out (--fallback-file) got through to,
- * and when it last did: its next connections go straight there instead of
- * paying the whole ladder again, until FB_MS pass without one. Keyed by the
- * name itself, never its site: one name of a site needing it says nothing
- * about the others (an API that turns this client away, say). */
+ * and when it first did: its next connections go straight there instead of
+ * paying the whole ladder again, for FB_MS. Then the techniques are tried
+ * again: until 2.6.74 each connection Tor carried renewed the time, so a
+ * name Tor took once (a moment the network failed, a wake from sleep) stayed
+ * on Tor for as long as it was used, and everything crawled ("since the Tor
+ * feature it always uses Tor"). Keyed by the name itself, never its site:
+ * one name of a site needing it says nothing about the others (an API that
+ * turns this client away, say). */
 #define FB_SLOTS 128
-#define FB_MS    (30 * 60 * 1000)
+#define FB_MS    (15 * 60 * 1000)
 static struct { char host[256]; char site[256]; uint64_t t; } g_fb[FB_SLOTS];
 static mutex_t g_fb_mx;
 
@@ -392,20 +554,137 @@ static int fb_put(const char *h) {
     if (g_fb[i].host[0] && strcmp(g_fb[i].host, h) == 0) { slot = i; had = age_ms(now, g_fb[i].t) < FB_MS; break; }
     if (g_fb[i].t < g_fb[slot].t) slot = i;   /* else the oldest (or an empty one) */
   }
-  snprintf(g_fb[slot].host, sizeof(g_fb[slot].host), "%s", h);
-  if (!site_of(h, g_fb[slot].site, sizeof(g_fb[slot].site))) g_fb[slot].site[0] = 0;
-  g_fb[slot].t = now;
+  /* Kept already: its time stays, so the techniques get their turn again. */
+  if (!had) {
+    snprintf(g_fb[slot].host, sizeof(g_fb[slot].host), "%s", h);
+    if (!site_reg(h, g_fb[slot].site, sizeof(g_fb[slot].site))) g_fb[slot].site[0] = 0;
+    g_fb[slot].t = now;
+  }
   mutex_unlock(&g_fb_mx);
   return !had;
 }
 
+/* ── names the network keeps cutting ─────────────────────────────────────
+ * A name a technique opens but the network cuts each time soon after (in
+ * Iran, WhatsApp's and Instagram's: they connect, then nothing comes back):
+ * another technique is tried for its next connection (hs_on_cut), and once
+ * its cuts within CUTS_WIN_MS weigh CUTS_TO_FB (three sure ones, see
+ * CUT_W_SURE), while no connection to the site was answered (report: not
+ * site_ok), its next connections go to
+ * the last way out first, where one is set and may be used (fallback_ok).
+ * Not running yet, that is said (fallback, ok 0) with the name, which starts
+ * it or asks the user; the techniques go on meanwhile. Per name, as g_fb. */
+#define CUT_SLOTS   128
+#define CUTS_TO_FB  6
+/* What one cut weighs toward CUTS_TO_FB: a connection that stopped in the
+ * middle of a record or was reset on a request in flight is the network's
+ * doing, three of them are enough; a request nobody answered (noreply) is
+ * what a server holding a request open looks like too (a long poll, a video
+ * server that never got to it), so it takes six of those. Until 2.6.75 every
+ * cut counted alike: on Türk Telekom three connections to one of YouTube's
+ * video servers going unanswered at the same moment were enough to send it
+ * to Tor, on a network that blocks none of it. */
+#define CUT_W_SURE  2
+#define CUT_W_WEAK  1
+#define CUTS_WIN_MS (10 * 60 * 1000)
+static struct { char host[256]; int n; uint64_t t; } g_cuts[CUT_SLOTS];
+static mutex_t g_cuts_mx;
+
+static void cuts_note(const char *h, int w) {
+  if (!h || !h[0] || strlen(h) >= sizeof(g_cuts[0].host)) return;
+  mutex_lock(&g_cuts_mx);
+  uint64_t now = now_ms();
+  int slot = 0, had = 0;
+  for (int i = 0; i < CUT_SLOTS; i++) {
+    if (g_cuts[i].host[0] && strcmp(g_cuts[i].host, h) == 0) { slot = i; had = 1; break; }
+    if (g_cuts[i].t < g_cuts[slot].t) slot = i;   /* else the oldest (or an empty one) */
+  }
+  if (!had || age_ms(now, g_cuts[slot].t) >= CUTS_WIN_MS) {
+    snprintf(g_cuts[slot].host, sizeof(g_cuts[slot].host), "%s", h);
+    g_cuts[slot].n = 0;
+  }
+  g_cuts[slot].n += w;
+  g_cuts[slot].t = now;
+  mutex_unlock(&g_cuts_mx);
+}
+
+static int cuts_many(const char *h) {
+  int yes = 0;
+  mutex_lock(&g_cuts_mx);
+  uint64_t now = now_ms();
+  for (int i = 0; i < CUT_SLOTS; i++)
+    if (g_cuts[i].host[0] && strcmp(g_cuts[i].host, h) == 0) { yes = g_cuts[i].n >= CUTS_TO_FB && age_ms(now, g_cuts[i].t) < CUTS_WIN_MS; break; }
+  mutex_unlock(&g_cuts_mx);
+  return yes;
+}
+
+/* ── a network that freezes a name after so many bytes ───────────────────
+ * Connections to one name that each stop in the middle of a TLS record at
+ * about the same amount from the server: what a filter does that lets a
+ * connection open and then starves it (Russia: about 16 KB to Cloudflare's
+ * addresses; Iran, Shatel: abs.twimg.com and pbs.twimg.com at 43 to 46 KB,
+ * eighteen times in six minutes, so X opened and never finished loading).
+ * It is the address and the amount, not the name in the handshake, so no
+ * technique gets past it: after FRZ_SAME of them the name's next
+ * connections go to the last way out. Counted whether or not the site's
+ * other connections answer (site_ok): a server holding a request open does
+ * not stop in the middle of a record at the same byte each time. */
+#define FRZ_SLOTS 64
+#define FRZ_SAME  3
+#define FRZ_MIN_KB 4
+static struct { char host[256]; int kb, same; uint64_t t; } g_frz[FRZ_SLOTS];
+
+static void cuts_freeze(const char *h, int kb) {
+  if (!h || !h[0] || strlen(h) >= sizeof(g_frz[0].host) || kb < FRZ_MIN_KB) return;
+  int reached = 0;
+  mutex_lock(&g_cuts_mx);
+  uint64_t now = now_ms();
+  int slot = 0, had = 0;
+  for (int i = 0; i < FRZ_SLOTS; i++) {
+    if (g_frz[i].host[0] && strcmp(g_frz[i].host, h) == 0) { slot = i; had = 1; break; }
+    if (g_frz[i].t < g_frz[slot].t) slot = i;
+  }
+  int alike = had && age_ms(now, g_frz[slot].t) < CUTS_WIN_MS;
+  if (alike) {
+    int d = kb > g_frz[slot].kb ? kb - g_frz[slot].kb : g_frz[slot].kb - kb;
+    int tol = g_frz[slot].kb / 8 > 2 ? g_frz[slot].kb / 8 : 2;
+    alike = d <= tol;
+  }
+  if (!alike) {
+    snprintf(g_frz[slot].host, sizeof(g_frz[slot].host), "%s", h);
+    g_frz[slot].kb = kb;
+    g_frz[slot].same = 0;
+  }
+  g_frz[slot].same++;
+  g_frz[slot].t = now;
+  reached = g_frz[slot].same >= FRZ_SAME;
+  mutex_unlock(&g_cuts_mx);
+  if (reached) cuts_note(h, CUTS_TO_FB);
+}
+
+static void cuts_forget(void) {
+  mutex_lock(&g_cuts_mx);
+  memset(g_cuts, 0, sizeof(g_cuts));
+  memset(g_frz, 0, sizeof(g_frz));
+  mutex_unlock(&g_cuts_mx);
+}
+
 /* Another name of a site the last way out carries now (issue #77): its
- * ladder is kept short (ATT_BUDGET_FB_MS) where the last way out is up, so
- * a page's images and API names do not each wait out every technique before
- * reaching it. Each still tries the techniques first: never straight to it. */
+ * ladder is quick where the last way out is up, so a page's images and API
+ * names do not each wait as long as the first did. The untouched request
+ * gets a moment, not its five seconds, and the whole list goes out at once
+ * (BURST_SITE). Until 2.6.75 it was short instead: six seconds, which the
+ * untouched request alone used up, and then the last way out, with no
+ * technique tried. One name of Roblox that answers nobody had sent the
+ * game's other names to Tor like that (Türk Telekom: "it freezes, it cuts
+ * out halfway"), where a technique opens every one of them. */
 static int fb_site_is(const char *h) {
   char site[256];
-  if (!site_of(h, site, sizeof(site))) return 0;
+  /* By the registrable domain, never SITE_FAMILY (as ok_key, #79): since
+   * 2.6.58 one Roblox name the last way out carried (a stats server that
+   * does not answer) gave every rbxcdn.com name the short ladder too, and
+   * the game's maps and items went to Tor after 6 s, where they crawl. */
+  if (!site_reg(h, site, sizeof(site))) return 0;
   int yes = 0;
   mutex_lock(&g_fb_mx);
   uint64_t now = now_ms();
@@ -432,11 +711,23 @@ static void fb_drop(const char *h) {
   mutex_unlock(&g_fb_mx);
 }
 
+/* The other names of h's site the last way out keeps, let go. */
+static void fb_drop_site(const char *h) {
+  char site[256];
+  if (!site_reg(h, site, sizeof(site))) return;
+  mutex_lock(&g_fb_mx);
+  for (int i = 0; i < FB_SLOTS; i++)
+    if (g_fb[i].host[0] && g_fb[i].site[0] && strcmp(g_fb[i].site, site) == 0) { g_fb[i].host[0] = 0; g_fb[i].t = 0; }
+  mutex_unlock(&g_fb_mx);
+}
+
 /* Something answered for the host. */
 static void cool_drop(const char *h) {
   mutex_lock(&g_cool_mx);
   for (int i = 0; i < COOL_SLOTS; i++)
     if (g_cool[i].host[0] && strcmp(g_cool[i].host, h) == 0) { g_cool[i].host[0] = 0; g_cool[i].t = 0; break; }
+  for (int i = 0; i < EX_SLOTS; i++)
+    if (g_ex[i].host[0] && strcmp(g_ex[i].host, h) == 0) { g_ex[i].host[0] = 0; g_ex[i].t = 0; break; }
   mutex_unlock(&g_cool_mx);
 }
 
@@ -466,7 +757,7 @@ static mutex_t   g_hs_mx;
 /* Per host, the technique a silent ladder did not get to (see below). Long
  * enough to live through a browser's retries; short enough that a lifted
  * block, or another network, gets its untouched attempt back soon. */
-typedef struct { char host[256]; int next; uint64_t t; int used; } hostresume;
+typedef struct { char host[256]; int next; uint64_t t; int used;  int plain; /* left by a plain-HTTP ladder */ } hostresume;
 #define RS_SIZE   128
 #define RS_TTL_MS (10 * 60 * 1000)
 static hostresume g_rs[RS_SIZE];
@@ -585,8 +876,11 @@ static int rs_live(const char *k, uint64_t now) {
  * when it is the site's; *stale when it was learned so long ago that it is to
  * be checked again, see HS_VERIFY_MS), else neither. A resume point comes
  * before a learned technique: it means the last ladder, that technique
- * included, came to nothing. resume: 0 to ignore resume points (only TLS
- * ladders keep going through silence). With nothing of its own and nothing
+ * included, came to nothing. resume: 0 to ignore resume points, 1 a TLS
+ * ladder, 2 a plain-HTTP one, which carries on only where a plain-HTTP
+ * ladder left off (one the network dropped the request of: a name's
+ * handshake being dropped says nothing about its http:// requests, and a
+ * slow server is not to be sent the request twice for it). With nothing of its own and nothing
  * learned for its site, a name carries on where its site's last name left
  * off (*site_from): a site of many names, a video CDN's (googlevideo.com,
  * issue #37), then has every technique tried across its names rather than
@@ -599,13 +893,14 @@ static void ladder_start(const char *h, int resume, int *from, int *learned, int
   mutex_lock(&g_hs_mx);
   uint64_t now = now_ms();   /* under the lock, so no entry is newer than it */
   int r = resume ? rs_live(h, now) : -1, l = hs_find(h);
+  if (r >= 0 && resume == 2 && !g_rs[r].plain) r = -1;
   if (r >= 0) *from = g_rs[r].next;
   else {
     if (l < 0 && has_site && (l = hs_find(site)) >= 0) *inherited = 1;
     if (l >= 0) {
       *learned = g_hs[l].preset;
       *stale = age_ms(now, g_hs[l].t) >= HS_VERIFY_MS;
-    } else if (resume && has_site && (r = rs_live(site, now)) >= 0) {
+    } else if (resume && has_site && (r = rs_live(site, now)) >= 0 && (resume != 2 || g_rs[r].plain)) {
       *from = g_rs[r].next;
       *site_from = 1;
     }
@@ -614,7 +909,7 @@ static void ladder_start(const char *h, int resume, int *from, int *learned, int
 }
 
 /* Caller holds g_hs_mx. */
-static void rs_store(const char *k, int next) {
+static void rs_store(const char *k, int next, int plain) {
   int slot = rs_find(k);
   uint64_t old = (uint64_t)-1;
   if (slot < 0) {   /* else a free slot, else the one left alone longest */
@@ -626,12 +921,12 @@ static void rs_store(const char *k, int next) {
   if (slot < 0) slot = 0;
   memset(&g_rs[slot], 0, sizeof(g_rs[slot]));
   strncpy(g_rs[slot].host, k, sizeof(g_rs[slot].host) - 1);
-  g_rs[slot].next = next; g_rs[slot].t = now_ms(); g_rs[slot].used = 1;
+  g_rs[slot].next = next; g_rs[slot].t = now_ms(); g_rs[slot].used = 1; g_rs[slot].plain = plain;
 }
 
-static void rs_put(const char *h, int next) {
+static void rs_put(const char *h, int next, int plain) {
   mutex_lock(&g_hs_mx);
-  rs_store(h, next);
+  rs_store(h, next, plain);
   mutex_unlock(&g_hs_mx);
 }
 
@@ -775,7 +1070,8 @@ int engine_is_running(void) { return atomic_load(&g_running); }
 void engine_emit_stats(void) {
   engine_printf("{\"type\":\"stats\",\"conns_total\":%llu,\"conns_active\":%llu,"
          "\"bytes_up\":%llu,\"bytes_down\":%llu,\"desync\":%llu,"
-         "\"tls\":%llu,\"http\":%llu,\"probe_ok\":%llu,\"probe_fail\":%llu,\"blocked\":%llu,\"fallback\":%llu}\n",
+         "\"tls\":%llu,\"http\":%llu,\"probe_ok\":%llu,\"probe_fail\":%llu,\"blocked\":%llu,\"fallback\":%llu,"
+         "\"udp_in\":%llu}\n",
          (unsigned long long)atomic_load(&g_stats.conns_total),
          (unsigned long long)atomic_load(&g_stats.conns_active),
          (unsigned long long)atomic_load(&g_stats.bytes_up),
@@ -786,7 +1082,8 @@ void engine_emit_stats(void) {
          (unsigned long long)atomic_load(&g_stats.probe_success),
          (unsigned long long)atomic_load(&g_stats.probe_fail),
          (unsigned long long)adblock_total(),
-         (unsigned long long)atomic_load(&g_stats.fallback));
+         (unsigned long long)atomic_load(&g_stats.fallback),
+         (unsigned long long)atomic_load(&g_stats.udp_in));
 }
 
 /* ── SOCKS handshake (client side) ──────────────────────────────────────── */
@@ -819,9 +1116,14 @@ typedef struct {
    * those on purpose, and they are connected to as asked. */
   int      blockpage;
   /* ver 2: the request's head, as the server is to get it, sent as the
-   * client's first payload (first_payload); NULL otherwise. Freed by handle(). */
+   * client's first payload (first_payload); NULL otherwise. Freed by handle().
+   * Also what a client that asked for an outlived stand-in address sent
+   * first (standin_name). */
   char    *head;
   int      head_len;
+  /* The client has been told yes already (standin_name): nothing more is
+   * said to it in its protocol, whatever comes of the connection. */
+  int      answered;
 } socks_req;
 
 static int recv_exact(sock_t c, uint8_t *b, int n) {
@@ -866,6 +1168,7 @@ static int send_str(sock_t c, const char *s) { return sock_send_all(c, (const ui
 /* Tell the client whether its connection is up, in its own protocol. A plain
  * http:// request (ver 2) is answered by the server itself once it is up. */
 static int socks_reply(sock_t c, const socks_req *rq, int ok) {
+  if (rq->answered) return 0;
   if (rq->ver == 1 || rq->ver == 2) {
     static const char yes[] = "HTTP/1.1 200 Connection established\r\n\r\n";
     static const char no[]  = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -1382,6 +1685,46 @@ static int first_payload(sock_t c, sock_t up, socks_req *rq, uint8_t *buf, int c
   return read_first(c, up, buf, cap);
 }
 
+/* ── a stand-in address that outlived its mapping ───────────────────────
+ * On a phone the tunnel answers every name with a stand-in address
+ * (--fake-net) and maps it back before the connection reaches the engine;
+ * a new tunnel (the phone moved to another network, IPv6 came or went)
+ * starts with other addresses, and one from before reaches the engine as
+ * it is, a bare address nobody can connect to. It used to be refused at
+ * once, so that the app looks the name up again. Browsers do. An app that
+ * keeps addresses itself does not: TikTok went on asking for the old ones
+ * (three hundred connections in the minute after a network change, on a
+ * phone that changed network six times in an evening: "it freezes all the
+ * time"), until its own cache ran out.
+ *
+ * The app says which site it means in the first thing it sends: the server
+ * name of its TLS handshake, or the Host of an http:// request. So the
+ * client is told yes, that is read, and the connection goes on by that name
+ * as if it had been asked for by name: our own lookup, the techniques, the
+ * user's lists. Nothing is trusted that was not before: the app checks the
+ * certificate of the name it asked for, as always. A connection that names
+ * nothing (no TLS, no HTTP, or the server is to speak first) is closed: an
+ * address that stands for nothing cannot be dialled. 1: rq is that name now,
+ * with what the client sent kept as its first payload (rq->head). */
+static int standin_name(sock_t c, socks_req *rq) {
+  uint8_t *buf = (uint8_t *)malloc(RELAY_BUF);
+  if (!buf) { socks_reply(c, rq, 0); return 0; }
+  if (socks_reply(c, rq, 1) != 0) { free(buf); return 0; }
+  rq->answered = 1;
+  int n = read_first(c, SOCK_INVALID, buf, RELAY_BUF);
+  proto_info pi;
+  memset(&pi, 0, sizeof(pi));
+  if (n > 0) proto_inspect(buf, (size_t)n, &pi);
+  if (n <= 0 || !pi.host[0] || strlen(pi.host) >= sizeof(rq->host) || ip_literal(pi.host)) { free(buf); return 0; }
+  snprintf(rq->host, sizeof(rq->host), "%s", pi.host);
+  rq->atyp = 3;
+  rq->blockpage = 0;
+  free(rq->head);
+  rq->head = (char *)buf;
+  rq->head_len = n;
+  return 1;
+}
+
 static int socks_accept(sock_t c, socks_req *rq) {
   uint8_t b[300];
   memset(rq, 0, sizeof(*rq));
@@ -1389,7 +1732,7 @@ static int socks_accept(sock_t c, socks_req *rq) {
   if (sock_wait_readable(c, 5000) != 1) return -1;
   if (recv_exact(c, b, 2) != 0) return -1;
   if (b[0] == 'C' && b[1] == 'O') {
-    if (auth) {
+    if (auth && !g_cfg.http_open) {
       static const char no[] = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
       send_str(c, no);
       return -1;
@@ -1398,7 +1741,7 @@ static int socks_accept(sock_t c, socks_req *rq) {
   }
   /* Any other request in capitals: a plain http:// one, or refused. */
   if (b[0] >= 'A' && b[0] <= 'Z' && b[1] >= 'A' && b[1] <= 'Z') {
-    if (auth) {
+    if (auth && !g_cfg.http_open) {
       static const char no[] = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
       send_str(c, no);
       return -1;
@@ -1797,7 +2140,7 @@ static sock_t dial(const char *host, uint16_t port, int prefer6, int use_doh,
 
 /* apps: application-data records; alerts: plaintext alert records; app1: the
  * length of the first application-data record (see client_refused). */
-typedef struct { int have; uint8_t hdr[5]; uint32_t left; int lost; uint32_t apps; uint32_t alerts; uint32_t app1; } tls_track;
+typedef struct { int have; uint8_t hdr[5]; uint32_t left; int lost; uint32_t apps; uint32_t alerts; uint32_t app1; uint32_t ccs; } tls_track;
 
 /* Follow the server's TLS record boundaries. */
 static void tls_follow(tls_track *t, const uint8_t *p, int n) {
@@ -1815,6 +2158,7 @@ static void tls_follow(tls_track *t, const uint8_t *p, int n) {
           t->apps++;
         }
         if (t->hdr[0] == 21) t->alerts++;
+        if (t->hdr[0] == 20) t->ccs++;
       }
     } else {
       uint32_t take = t->left < (uint32_t)n ? t->left : (uint32_t)n;
@@ -1849,14 +2193,18 @@ typedef struct {
 
 /* The client turned the server's handshake down: the server answered, and
  * before any request the client's only word was an alert. In TLS 1.2 that is
- * a plaintext alert record; in TLS 1.3 an encrypted one, a single record of
+ * a plaintext alert record before its ChangeCipherSpec (a client that took
+ * the certificate sends that and its Finished first; an alert after them is
+ * its close_notify, sent when it closes a connection it never used, which is
+ * no refusal: so taken, every unused TLS 1.2 connection left a technique out
+ * of its name for hours); in TLS 1.3 an encrypted one, a single record of
  * 19 bytes (two bytes of alert, its type, a 16-byte tag), where a client that
  * goes on sends its Finished (53 bytes or more) first. A browser does this
  * when the certificate is not the site's (#68: DDoS-Guard, given a
  * ClientHello in two records, answered with its own certificate). */
 static int client_refused(const cut_watch *cw) {
   if (cw->down == 0 || cw->answered || cw->ct.lost) return 0;
-  if (cw->ct.alerts > 0 && cw->ct.apps == 0) return 1;
+  if (cw->ct.alerts > 0 && cw->ct.apps == 0 && cw->ct.ccs == 0) return 1;
   return cw->ct.alerts == 0 && cw->ct.apps == 1 && cw->ct.app1 == 19;
 }
 
@@ -2009,6 +2357,29 @@ static void json_host(char *out, size_t cap, const char *in) {
  * it is a different kind of filter. */
 static void report(const char *ev, const char *host, const char *strat,
                    int attempts, int fam, const char *note) {
+  /* Counted toward the last way out only while the site works nowhere
+   * else: a cut beside its other connections answering (site_ok) is that
+   * server's own way (a request it holds open), not a block. */
+  /* Frozen at the same amount again and again (cuts_freeze): the network's
+   * doing, site_ok or not. For a stall, attempts is the KB that came. */
+  if (strcmp(ev, "cut") == 0 && strat && strcmp(strat, "stall") == 0) cuts_freeze(host, attempts);
+  if (strcmp(ev, "cut") == 0 && !(note && strcmp(note, "site_ok") == 0)) {
+    cuts_note(host, strat && strcmp(strat, "noreply") == 0 ? CUT_W_WEAK : CUT_W_SURE);
+    /* Frozen after about 16 KB from the server: what Russia's filters do to
+     * the addresses of Cloudflare and other hosts abroad. No technique gets
+     * past it, since it is the address and the amount, not the name, so the
+     * next connection goes to the last way out at once instead of after two
+     * more broken pages (freeip.me on T2 in Moscow). */
+    if (strat && strcmp(strat, "stall") == 0 && attempts >= 12 && attempts <= 24)
+      cuts_note(host, CUTS_TO_FB);
+  }
+  /* Every technique failed for a name while another name of its site goes
+   * through the last way out already: counted like a cut, so after a few its
+   * next connections go there at once. An app that gives up on a connection
+   * in two or three seconds (Instagram on Irancell: i.instagram.com, dozens
+   * a minute) left before the ladder reached Tor, every time, and never got
+   * a byte, while test-gateway.instagram.com worked through Tor beside it. */
+  if (strcmp(ev, "blocked") == 0 && g_cfg.fallback_kind && !g_cfg.upstream_kind && fb_site_is(host)) cuts_note(host, CUT_W_SURE);
   char h[256];
   json_host(h, sizeof(h), host);
   engine_printf("{\"type\":\"%s\",\"host\":\"%s\",\"strategy\":\"%s\","
@@ -2224,6 +2595,22 @@ static void legs_make_room(legset *L) {
   }
 }
 
+static int sock_peer_local(sock_t s);
+
+/* Did the request reach anyone? The ladder's untouched request (its oldest
+ * connection, when it opened with a technique) has been out for seconds by
+ * the time this is asked: a server that is only slow acknowledged it long
+ * ago, and what is still unacknowledged then was taken on the way, which is
+ * how a filter drops a request without a word. 1: taken; 0: it arrived, or
+ * the system does not say (sock_unacked). */
+static int legs_unheard(const legset *L) {
+  if (L->n == 0) return 0;
+  int k = 0;
+  for (int i = 0; i < L->n; i++) if (L->l[i].cand == ATT_PLAIN) { k = i; break; }
+  if (g_cfg.local_unacked && sock_peer_local(L->l[k].s)) return 1;
+  return sock_unacked(L->l[k].s) > 0;
+}
+
 /* Add the attempt just made. */
 static void legs_add(legset *L, leg g) {
   legs_make_room(L);
@@ -2245,6 +2632,7 @@ typedef struct {
   int first_failed;        /* the technique it opened with was refused, or (TLS) went unanswered */
   int made;                /* attempts that went out */
   int silent;              /* attempts whose wait ran out unanswered */
+  int dropped;             /* plain HTTP: the network took the request (legs_unheard) */
   legset L;
 } ladder_st;
 
@@ -2373,13 +2761,15 @@ static void ladder_won(ladder_st *st, const leg *w) {
      * to go on — one that failed first, or one it was checking — is not
      * needed here, and a silent search is over. */
     if (st->learned >= 0) hs_unlearn(st->key, st->inherited);
-    if (st->tls) rs_drop(st->key);
+    if (st->tls || st->dropped) rs_drop(st->key);
     return;
   }
   if (w->cand < 0) return;
   int plain_open = 0;
   for (int i = 0; i < st->L.n; i++) if (st->L.l[i].cand == ATT_PLAIN) plain_open = 1;
-  int untouched_blocked = st->plain_refused || (st->tls && plain_open);
+  /* Plain HTTP: only when the untouched request never arrived (legs_unheard);
+   * unanswered alone, it may be a slow server's. */
+  int untouched_blocked = st->plain_refused || (plain_open && (st->tls || st->dropped || legs_unheard(&st->L)));
   int replaces = st->opened_learned && st->first_failed && w->idx != 0;
   if (untouched_blocked || replaces) {
     hs_put(st->key, w->cand);
@@ -2389,7 +2779,7 @@ static void ladder_won(ladder_st *st, const leg *w) {
     if (w->cand != st->learned)
       report("bypass", st->key, strategy_preset(w->cand)->name, st->made, w->fam,
              st->saw_refusal ? NULL : "silent");
-  } else if (st->tls) {
+  } else if (st->tls || st->dropped) {
     rs_drop(st->key);
   }
 }
@@ -2610,6 +3000,8 @@ typedef struct {
   uint8_t  q[UDP_DNS_Q_MAX];             /* as the app sent it, its own id included */
 } udp_dns_q;
 
+#define UDP_FLOWS 8
+
 /* The association's state: its sockets, the client's endpoint, and the last
  * name it sent to. Lives on the connection thread's stack; buf on the heap. */
 typedef struct {
@@ -2625,6 +3017,14 @@ typedef struct {
   uint8_t *buf;
   uint64_t last;                         /* last datagram either way */
   int other;                             /* a datagram went to a port other than 53 */
+  /* Where its datagrams went (not DNS), for the Connections list: the name
+   * or address, the address replies come from, its row (conns). */
+  struct { char host[256]; uint16_t port; struct sockaddr_storage sa; int slot; } flow[UDP_FLOWS];
+  int nflow;
+  /* Port 443 with QUIC turned off: 0 nothing sent there yet, 1 QUIC (its
+   * Initial refused, the rest dropped), 2 not QUIC (a call's or a game's
+   * own datagrams on 443: sent like any other). */
+  int quic443;
 } udp_assoc;
 
 /* Private and link-local ranges (a LAN's own resolver lives there): IPv4
@@ -2702,6 +3102,52 @@ static int dns_query_parse(const uint8_t *q, size_t n, char *name, size_t cap,
 /* A datagram from the client, without its header, to where the header says:
  * a name through our resolver (the last one is remembered), never into this
  * machine nor to a stand-in address. 0 when it went. */
+/* An address as text (no port); 0 when it cannot be written. */
+static int sa_text(const struct sockaddr_storage *sa, char *out, size_t n) {
+  const void *a = sa->ss_family == AF_INET6 ? (const void *)&((const struct sockaddr_in6 *)sa)->sin6_addr
+                                            : (const void *)&((const struct sockaddr_in *)sa)->sin_addr;
+  return inet_ntop(sa->ss_family, a, out, (socklen_t)n) != NULL;
+}
+
+/* The same address and port. */
+static int sa_same(const struct sockaddr_storage *a, const struct sockaddr_storage *b) {
+  if (a->ss_family != b->ss_family) return 0;
+  if (a->ss_family == AF_INET) {
+    const struct sockaddr_in *x = (const struct sockaddr_in *)a, *y = (const struct sockaddr_in *)b;
+    return x->sin_port == y->sin_port && x->sin_addr.s_addr == y->sin_addr.s_addr;
+  }
+  const struct sockaddr_in6 *x = (const struct sockaddr_in6 *)a, *y = (const struct sockaddr_in6 *)b;
+  return x->sin6_port == y->sin6_port && memcmp(&x->sin6_addr, &y->sin6_addr, sizeof(x->sin6_addr)) == 0;
+}
+
+/* A datagram out to d (at `to`): counted under its name or address in the
+ * Connections list, a row per destination while the association lives. */
+static void udp_flow_note(udp_assoc *u, const sudp_dst *d, const struct sockaddr_storage *to, size_t plen) {
+  char host[256];
+  if (d->atyp == 3) snprintf(host, sizeof(host), "%s", d->host);
+  else if (!sa_text(to, host, sizeof(host))) return;
+  for (int i = 0; i < u->nflow; i++) {
+    if (u->flow[i].port == d->port && strcmp(u->flow[i].host, host) == 0) { conns_bytes(u->flow[i].slot, plen, 0); return; }
+  }
+  if (u->nflow >= UDP_FLOWS) return;
+  int slot = conns_begin(host);
+  if (slot < 0) return;
+  conns_route(slot, CONN_UDP);
+  conns_bytes(slot, plen, 0);
+  int k = u->nflow++;
+  snprintf(u->flow[k].host, sizeof(u->flow[k].host), "%s", host);
+  u->flow[k].port = d->port;
+  u->flow[k].sa = *to;
+  u->flow[k].slot = slot;
+}
+
+/* A datagram back from `from`: counted under the destination it answers. */
+static void udp_flow_back(udp_assoc *u, const struct sockaddr_storage *from, size_t n) {
+  for (int i = 0; i < u->nflow; i++) {
+    if (sa_same(&u->flow[i].sa, from)) { conns_bytes(u->flow[i].slot, 0, n); return; }
+  }
+}
+
 static int udp_send_out(udp_assoc *u, const sudp_dst *d, const uint8_t *payload, size_t plen) {
   struct sockaddr_storage to; socklen_t tl;
   if (sudp_dst_addr(d, &to, &tl) != 0) {
@@ -2726,6 +3172,7 @@ static int udp_send_out(udp_assoc *u, const sudp_dst *d, const uint8_t *payload,
   if (sendto(*os, (const char *)payload, (int)plen, 0, (struct sockaddr *)&to, tl) < 0) return -1;
   u->last = now_ms();
   atomic_fetch_add(&g_stats.bytes_up, (uint64_t)plen);
+  if (d->port != 53) udp_flow_note(u, d, &to, plen);
   return 0;
 }
 
@@ -2744,6 +3191,15 @@ static uint16_t udp_dns_fid(udp_assoc *u) {
   }
 }
 
+/* A query about a name only the LAN knows, to a resolver on the LAN. */
+static int udp_dns_lan_only(const sudp_dst *d, const uint8_t *q, size_t ql) {
+  struct sockaddr_storage to; socklen_t tl;
+  if (sudp_dst_addr(d, &to, &tl) != 0 || !udp_dst_private(&to)) return 0;
+  char name[256]; size_t qend; int edns;
+  if (dns_query_parse(q, ql, name, sizeof(name), &qend, &edns) != 0) return 0;
+  return doh_local_name(name);
+}
+
 /* Plain DNS from the client, sent to the forwarder instead of where it was
  * headed. 1 when it went (it is done with), 0 when it should go out as any
  * other datagram: the engine has no forwarder, the datagram is not a
@@ -2759,7 +3215,10 @@ static int udp_dns_redirect(udp_assoc *u, const sudp_dst *d, const uint8_t *hdr,
   if (dns_query_parse(q, ql, name, sizeof(name), &qend, &edns) != 0) return 0;
   if (doh_local_name(name)) return 0;
   struct sockaddr_storage to; socklen_t tl;
-  if (sudp_dst_addr(d, &to, &tl) == 0) { if (udp_dst_private(&to)) return 0; }
+  /* A resolver on the LAN (the router) asks the provider in turn: with the
+   * user's own server set, a public name goes to the forwarder (and on
+   * through the server) wherever the app sent it (issue #67). */
+  if (sudp_dst_addr(d, &to, &tl) == 0) { if (udp_dst_private(&to) && !g_cfg.upstream_kind) return 0; }
   else if (doh_local_name(d->host)) return 0;
   if (!u->dq) {
     u->dq = (udp_dns_q *)calloc(UDP_DNS_SLOTS, sizeof(udp_dns_q));
@@ -2819,6 +3278,9 @@ static int udp_dns_tick(udp_assoc *u, int max) {
     uint64_t age = age_ms(t, e->t);
     if (age >= UDP_DNS_WAIT_MS) { e->used = 0; continue; }
     if (e->plain) continue;
+    /* With the user's own server, DNS never goes out past it: the forwarder
+     * answers through the server, or the app asks again (issue #67). */
+    if (g_cfg.upstream_kind) continue;
     if (age < UDP_DNS_PLAIN_MS) {
       int left = (int)(UDP_DNS_PLAIN_MS - age);
       if (left < next) next = left;
@@ -2853,7 +3315,7 @@ static void udp_dns_answers(udp_assoc *u) {
      * now rather than after UDP_DNS_PLAIN_MS, and an answer the forwarder
      * may still find is passed on too. */
     if (doh_reply_noroute(a, n)) {
-      if (!e->plain) {
+      if (!e->plain && !g_cfg.upstream_kind) {
         e->plain = 1;
         sudp_dst d;
         if (sudp_parse(e->hdr, e->hl, &d) == SUDP_OK) udp_send_out(u, &d, e->q, e->ql);
@@ -2895,11 +3357,49 @@ static int udp_dns_blocked(udp_assoc *u, const sudp_dst *d, const uint8_t *hdr,
   out[0] = out[1] = out[2] = 0;                           /* RSV, FRAG */
   int n = adb_dns_answer(q, qend, out + d->hdr_len, sizeof(out) - d->hdr_len);
   if (n < 0) return 0;
-  adblock_count();
+  adblock_count(); conns_ad(name);
   sendto(u->relay, (const char *)out, (int)d->hdr_len + n, 0,
          (struct sockaddr *)&u->client, sizeof(u->client));
   u->last = now_ms();
   return 1;
+}
+
+/* From udpdpi.c (its header is not included here: its flow table names
+ * clash with this file's own udp_flow_note). */
+int quic_version_negotiation(const uint8_t *p, int len, uint8_t *out, int cap);
+
+/* QUIC that is turned off: its Initial is answered here, as if the server
+ * had, with a Version Negotiation offering no version the app knows
+ * (quic_version_negotiation), so the app gives QUIC up at once and uses TCP.
+ * Dropped unanswered, the app first waited for its own QUIC timeout:
+ * Instagram's comments came late or minutes later (SR-Y78G, Turkey). Any
+ * other datagram to port 443 is dropped as before. */
+static void udp_quic_refused(udp_assoc *u, const sudp_dst *d, const uint8_t *hdr,
+                             const uint8_t *q, size_t ql) {
+  if (!u->have_client || d->hdr_len > SUDP_HDR_MAX) return;
+  uint8_t out[SUDP_HDR_MAX + 64];
+  int n = quic_version_negotiation(q, (int)(ql > 65535 ? 65535 : ql), out + d->hdr_len,
+                                   (int)sizeof(out) - (int)d->hdr_len);
+  if (n <= 0) return;
+  memcpy(out, hdr, d->hdr_len);
+  out[0] = out[1] = out[2] = 0;                           /* RSV, FRAG */
+  sendto(u->relay, (const char *)out, (int)d->hdr_len + n, 0,
+         (struct sockaddr *)&u->client, sizeof(u->client));
+  u->last = now_ms();
+}
+
+/* A STUN binding request (RFC 5389): type 0x0001, its length, the magic
+ * cookie. */
+static int stun_binding(const uint8_t *p, size_t n) {
+  if (n < 20 || p[0] != 0x00 || p[1] != 0x01) return 0;
+  if (p[4] != 0x21 || p[5] != 0x12 || p[6] != 0xa4 || p[7] != 0x42) return 0;
+  return (size_t)(((unsigned)p[2] << 8) | p[3]) + 20 == n;
+}
+
+/* The destination is on this device's network (an address, private). */
+static int udp_dst_lan(const sudp_dst *d) {
+  struct sockaddr_storage to; socklen_t tl;
+  return d->atyp != 3 && sudp_dst_addr(d, &to, &tl) == 0 && udp_dst_private(&to);
 }
 
 /* Datagrams from the client: each one, unwrapped, goes to its destination. */
@@ -2908,6 +3408,9 @@ static void udp_from_client(udp_assoc *u) {
     struct sockaddr_storage from; socklen_t fl = sizeof(from);
     int n = (int)recvfrom(u->relay, (char *)u->buf, 65536, 0, (struct sockaddr *)&from, &fl);
     if (n < 0) break;   /* nothing more (or an error report): back to waiting */
+    /* Counted before anything is let go: Android's tunnel check (HevWatch)
+     * takes any datagram here as hev working, whatever becomes of it. */
+    atomic_fetch_add(&g_stats.udp_in, 1);
     /* Only the client: its address, over IPv4 loopback, and once known its
      * port. */
     const struct sockaddr_in *f4 = (const struct sockaddr_in *)&from;
@@ -2932,14 +3435,41 @@ static void udp_from_client(udp_assoc *u) {
     /* To a name on the ad and tracker list: dropped (an app then tries TCP,
      * which ends the same way). A lookup of one is answered here. */
     if (d.atyp == 3 && adblock_blocked(d.host)) continue;
+    /* A name the user blocked in the Connections list: its datagrams too. */
+    if (d.atyp == 3 && conns_blocked(d.host)) continue;
     /* QUIC turned off (--drop-quic): the app falls back to TCP. An
      * association that only ever carried it ends like a DNS one. */
-    if (g_cfg.drop_quic && d.port == 443) continue;
+    /* With the user's own server every site goes through it over TCP; QUIC
+     * would leave from this device's own address (issue #67), so it is
+     * dropped and browsers and apps use TCP. */
+    /* Only QUIC: a flow starts with a long header (its Initial), and one
+     * that starts with anything else is not QUIC and goes as any UDP does.
+     * Every datagram to 443 dropped had cut what uses UDP 443 for itself
+     * (calls' relays among them: SR-F040, WhatsApp calls stuck on
+     * "connecting"). */
+    if ((g_cfg.drop_quic || g_cfg.upstream_kind) && d.port == 443) {
+      int long_hdr = plen >= 5 && (payload[0] & 0xc0) == 0xc0 &&
+                     (payload[1] | payload[2] | payload[3] | payload[4]) != 0;
+      if (u->quic443 != 2 && long_hdr) { u->quic443 = 1; udp_quic_refused(u, &d, u->buf, payload, plen); continue; }
+      if (u->quic443 == 1) continue;
+      u->quic443 = 2;
+    }
+    /* With the user's own server, a STUN binding request to the internet:
+     * dropped. Its answer says the address it came from, and a web page
+     * reads that through WebRTC: this device's own address, beside the
+     * server's (issues #58, #59, #67, browserleaks.com/webrtc). WebRTC then
+     * goes through a TURN relay over TCP, through the server; games and
+     * calls on their own UDP go on as before. */
+    if (g_cfg.upstream_kind && stun_binding(payload, plen) && !udp_dst_lan(&d)) continue;
     if (g_cfg.ipv4_only && d.atyp == 4) continue;
     if (d.port != 53) u->other = 1;
     if (d.port == 53 && udp_dns_blocked(u, &d, u->buf, payload, plen)) continue;
     /* Plain DNS: to the encrypted forwarder, when it is a query for it. */
     if (d.port == 53 && udp_dns_redirect(u, &d, u->buf, payload, plen)) continue;
+    /* DNS the forwarder could not take, with the user's own server set: only
+     * a LAN name to a LAN resolver goes; anything else would tell the
+     * provider which sites are visited (issue #67). */
+    if (d.port == 53 && g_cfg.upstream_kind && !udp_dns_lan_only(&d, payload, plen)) continue;
     udp_send_out(u, &d, payload, plen);
   }
 }
@@ -2960,6 +3490,7 @@ static void udp_to_client(udp_assoc *u, sock_t s) {
                (struct sockaddr *)&u->client, sizeof(u->client)) < 0) continue;
     u->last = now_ms();
     atomic_fetch_add(&g_stats.bytes_down, (uint64_t)n);
+    udp_flow_back(u, &from, (size_t)n);
   }
 }
 
@@ -3044,6 +3575,7 @@ static void udp_associate(sock_t client, const socks_req *rq) {
   }
 
 out:
+  for (int i = 0; i < u.nflow; i++) conns_end(u.flow[i].slot);
   sock_close(u.relay); sock_close(u.out4); sock_close(u.out6); sock_close(u.dns);
   free(u.dq);
   free(u.buf);
@@ -3636,7 +4168,8 @@ static int nd_usable(const struct sockaddr_storage *ss) {
     if (doh_ipv4_is_blockpage(ip) || (ip >> 24) == 0 || (ip >> 24) >= 224 || udp_v4_private(ip)) return 0;
     return 1;
   }
-  if (ss->ss_family == AF_INET6) return !udp_dst_forbidden(ss) && !udp_dst_private(ss);
+  if (ss->ss_family == AF_INET6) return !udp_dst_forbidden(ss) && !udp_dst_private(ss)
+    && !doh_ipv6_is_blockpage((const uint8_t *)&((const struct sockaddr_in6 *)ss)->sin6_addr);
   return 0;
 }
 
@@ -3660,7 +4193,34 @@ static void *nd_thread(void *p) {
     if (k > 0) no += k;
     k = doh_resolve_all(j->host, 443, 1, ours + no, ol + no, DOH_MAX_ADDRS);
     if (k > 0) no += k;
-    for (int pass = 0; pass < 2 && !j->addr[0]; pass++) {
+    /* One of its answers a known block page: the network's DNS forges this
+     * name, and its other answers are the censor's too. Türk Telekom gave
+     * roblox.com its block page 195.175.254.2 and, beside it, its own IPv6
+     * server (2a01:358:4014:a00::3), which no list had: "opened at the
+     * address this network's DNS gives", and every game join failed with an
+     * HTTP error from the block page. */
+    int forged = 0;
+    for (struct addrinfo *ai = res; ai && !forged; ai = ai->ai_next) {
+      if (ai->ai_family == AF_INET && (size_t)ai->ai_addrlen >= sizeof(struct sockaddr_in))
+        forged = doh_ipv4_is_blockpage(ntohl(((const struct sockaddr_in *)ai->ai_addr)->sin_addr.s_addr));
+      else if (ai->ai_family == AF_INET6 && (size_t)ai->ai_addrlen >= sizeof(struct sockaddr_in6))
+        forged = doh_ipv6_is_blockpage((const uint8_t *)&((const struct sockaddr_in6 *)ai->ai_addr)->sin6_addr);
+    }
+    /* AI_ADDRCONFIG left out the A records on a machine without IPv4? Ask
+     * for them alone: the forged one is usually there. */
+    if (!forged && !g_cfg.ipv4_only) {
+      struct addrinfo h4, *r4 = NULL;
+      memset(&h4, 0, sizeof(h4)); h4.ai_family = AF_INET; h4.ai_socktype = SOCK_STREAM;
+      int had4 = 0;
+      for (struct addrinfo *ai = res; ai; ai = ai->ai_next) if (ai->ai_family == AF_INET) had4 = 1;
+      if (!had4 && getaddrinfo(j->host, NULL, &h4, &r4) == 0 && r4) {
+        for (struct addrinfo *ai = r4; ai && !forged; ai = ai->ai_next)
+          if ((size_t)ai->ai_addrlen >= sizeof(struct sockaddr_in))
+            forged = doh_ipv4_is_blockpage(ntohl(((const struct sockaddr_in *)ai->ai_addr)->sin_addr.s_addr));
+      }
+      if (r4) freeaddrinfo(r4);
+    }
+    for (int pass = 0; pass < 2 && !j->addr[0] && !forged; pass++) {
       for (struct addrinfo *ai = res; ai && !j->addr[0]; ai = ai->ai_next) {
         if ((ai->ai_family == AF_INET) != (pass == 0) || (ai->ai_family != AF_INET && ai->ai_family != AF_INET6)) continue;
         if ((size_t)ai->ai_addrlen > sizeof(struct sockaddr_storage)) continue;
@@ -3721,8 +4281,8 @@ static int nd_lookup(const char *host, char *out, size_t cap, int wait_ms) {
  * answered and nothing has been read. */
 /* A connection refused by name: by the ad and tracker list (counted
  * there), or by the user's own blocks (conns.h, counted in its list). */
-static void refuse_named(sock_t client, socks_req *rq, uint8_t *buf, int flen, int ad) {
-  if (ad) adblock_count();
+static void refuse_named(sock_t client, socks_req *rq, uint8_t *buf, int flen, int ad, const char *name) {
+  if (ad) { adblock_count(); conns_ad(name); }
   if (flen < 0) {
     if (socks_reply(client, rq, 1) != 0) return;
     flen = first_payload(client, SOCK_INVALID, rq, buf, RELAY_BUF);
@@ -3735,8 +4295,8 @@ static void refuse_named(sock_t client, socks_req *rq, uint8_t *buf, int flen, i
     send_str(client, "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
   }
 }
-static void adblock_refuse(sock_t client, socks_req *rq, uint8_t *buf, int flen) { refuse_named(client, rq, buf, flen, 1); }
-static void user_refuse(sock_t client, socks_req *rq, uint8_t *buf, int flen) { refuse_named(client, rq, buf, flen, 0); }
+static void adblock_refuse(sock_t client, socks_req *rq, uint8_t *buf, int flen, const char *name) { refuse_named(client, rq, buf, flen, 1, name); }
+static void user_refuse(sock_t client, socks_req *rq, uint8_t *buf, int flen) { refuse_named(client, rq, buf, flen, 0, NULL); }
 
 /* ── the user's own server (--upstream-file) ─────────────────────────────
  * Every connection to a name goes through it: a SOCKS5 server (the name sent
@@ -3830,7 +4390,11 @@ static sock_t proxy_open(const proxy_ref *x, const char *host, uint16_t port) {
   dial_info di;
   sock_t s = dial(x->host, x->port, g_cfg.prefer_ipv6, 0, 0, &fam, &di);
   if (s == SOCK_INVALID) { proxy_report(x, "does not answer", host); return SOCK_INVALID; }
-  sock_set_timeouts(s, 15000);
+  /* Tor through bridges takes longer to reach a site than a server of the
+   * user's own (Russia: webtunnel or meek, a new circuit): 15 s cut it off,
+   * every time, and nothing went through it. */
+  sock_set_timeouts(s, x->fallback ? 45000 : 15000);
+  int greeted = 0;
   sock_set_nodelay(s, 1);
   size_t hl = strlen(host);
   if (hl == 0 || hl > 255) { sock_close(s); return SOCK_INVALID; }
@@ -3839,6 +4403,7 @@ static sock_t proxy_open(const proxy_ref *x, const char *host, uint16_t port) {
     int auth = x->user[0] != 0;
     uint8_t hello[4] = { 5, (uint8_t)(auth ? 2 : 1), (uint8_t)(auth ? 0 : 0), 2 };
     if (sock_send_all(s, hello, auth ? 4 : 3, 0) != 0 || recv_exact(s, b, 2) != 0 || b[0] != 5) goto bad;
+    greeted = 1;
     if (b[1] == 2 && auth) {
       size_t ul = strlen(x->user), pl = strlen(x->pass), k = 0;
       b[k++] = 1; b[k++] = (uint8_t)ul; memcpy(b + k, x->user, ul); k += ul;
@@ -3896,7 +4461,9 @@ static sock_t proxy_open(const proxy_ref *x, const char *host, uint16_t port) {
   if (x->fallback) atomic_store(&g_fb_ok_at, now_ms());
   return s;
 bad:
-  proxy_report(x, "does not speak the protocol chosen", host);
+  /* It spoke SOCKS, then gave no answer to the site in time (or broke off):
+   * slow, not a server of another protocol. */
+  proxy_report(x, greeted ? "did not reach the site in time" : "does not speak the protocol chosen", host);
 quiet:
   sock_close(s);
   return SOCK_INVALID;
@@ -3943,12 +4510,253 @@ static void via_upstream(sock_t client, socks_req *rq, uint8_t *first) {
   sock_close(up);
 }
 
+/* A name left as it is (ONLY): connected where the network's own DNS says,
+ * no technique, nothing changed. */
+static void via_plain(sock_t client, socks_req *rq) {
+  int fam = 0;
+  dial_info di;
+  sock_t up = dial(rq->host, rq->port, g_cfg.prefer_ipv6, 0, 0, &fam, &di);
+  if (up == SOCK_INVALID) { socks_reply(client, rq, 0); return; }
+  if (socks_reply(client, rq, 1) != 0) { sock_close(up); return; }
+  if (rq->head && rq->head_len > 0 && sock_send_all(up, (const uint8_t *)rq->head, (size_t)rq->head_len, 0) != 0) { sock_close(up); return; }
+  conns_route(t_conn, CONN_DIRECT);
+  relay(client, up, NULL);
+  sock_close(up);
+}
+
+/* ── the search goes on behind the last way out ──────────────────────────
+ * A ladder has one connection's time: the untouched request and four or
+ * five techniques on a network that drops without a word, the untouched
+ * request alone for a name whose site the last way out carries already
+ * (as it was until 2.6.75). Before there was a last way out the browser's next
+ * tries carried on down the list (rs_put) until a technique opened the site,
+ * and from then on it was fast. With one, the first ladder that ran out
+ * handed the name to it and nothing looked any further: where the technique
+ * that works comes late in the list (Türk Telekom, Turkcell Superonline) the
+ * site stayed on Tor, slow, on a network where nothing needs Tor ("it worked
+ * in the old version"). And a moment the network was down sent every name
+ * in use there for FB_MS.
+ *
+ * So while the last way out carries a name it took over from a ladder, the
+ * rest of the list is tried behind it, off the app's connection: the app's
+ * own first payload again (a ClientHello, or a GET: retry_safe), each
+ * technique the ladder did not get to on a connection of its own, the
+ * answer judged as a ladder judges it and the connection closed. One that
+ * gets through is learned and the name goes back to its own way (fb_drop,
+ * "direct"). Nothing found: once more after BG_REST_MS and once after that,
+ * then only the untouched request and what is known for the name, which is
+ * what a network that is itself again answers. A name the last way out took
+ * because no address of it could be reached has no payload: for it, only
+ * whether it connects now (BG_REST_ADDR_MS: sooner, since that is what a
+ * network down for a moment looks like). A name that found its way back
+ * takes the other names of its site with it (fb_drop_site): what opened it
+ * is theirs to try (ladder_start), before the last way out again. Never for a name the user sends there (conns_tor)
+ * or one the network cuts after it opens (cuts_many): those are not waiting
+ * for a technique. At most BG_MAX at a time; a name that finds no room is
+ * simply not searched this time. */
+#define BG_MAX      6
+#define BG_WAIT_MS  2500
+#define BG_DIAL_MS  6000
+static const int BG_REST_MS[] = { 0, 45 * 1000, 4 * 60 * 1000 };
+static const int BG_REST_ADDR_MS[] = { 10 * 1000, 35 * 1000, 4 * 60 * 1000 };   /* no payload: only whether it connects */
+/* No address of a name answers and the last way out is not running: it is
+ * asked for (started, or the user asked: "Open ... through Tor?") only if
+ * the name is still out of reach this long after. A network that went away
+ * for a moment makes every name unreachable for a few seconds; on Türk
+ * Telekom the question came ten seconds after the Wi-Fi was back, the user
+ * said yes, and from then on Tor was started in every session. */
+#define BG_ASK_MS 10000
+typedef struct {
+  int ask;              /* not on the last way out yet: whether it is to be asked for (bg_ask) */
+  char fbkey[256];      /* the name the last way out keeps */
+  char key[256];        /* the name techniques are learned for */
+  char dial_host[256];
+  uint16_t port;
+  int doh;
+  unsigned gen;         /* the engine run it belongs to */
+  uint8_t *first;       /* the app's first payload; NULL: only whether it connects */
+  int flen;
+  uint32_t tried;       /* techniques the ladder itself tried */
+  int from;             /* the first it did not get to */
+  int slot;
+} bg_job;
+static struct { char host[256]; } g_bg[BG_MAX];
+static mutex_t g_bg_mx;
+
+static int bg_alive(const bg_job *j) {
+  return atomic_load(&g_running) && atomic_load(&g_generation) == j->gen && (j->ask || fb_is(j->fbkey));
+}
+
+/* One attempt: 1 answered (or, with no payload, connected), 0 not, -1 no
+ * address of it reachable now. */
+static int bg_try(const bg_job *j, const proto_info *pi, int c, int *fam) {
+  dial_info di;
+  sock_t s = dial(j->dial_host, j->port, g_cfg.prefer_ipv6, j->doh, BG_DIAL_MS, fam, &di);
+  if (s == SOCK_INVALID) return -1;
+  if (!j->first) { sock_close(s); return 1; }
+  int ok = 0, rlen = 0;
+  uint8_t *work = (uint8_t *)malloc(RELAY_BUF), *rbuf = (uint8_t *)malloc(RELAY_BUF);
+  if (work && rbuf) {
+    memcpy(work, j->first, (size_t)j->flen);
+    if (attempt_send(s, *fam, work, RELAY_BUF, j->flen, pi, c) == 0 && sock_wait_readable(s, BG_WAIT_MS) == 1)
+      ok = read_reply(s, pi, rbuf, RELAY_BUF, &rlen, !doh_local_name(j->key) && !ip_literal(j->key)) == ATT_OK;
+  }
+  free(work); free(rbuf);
+  sock_close(s);
+  return ok;
+}
+
+static void *bg_thread(void *arg) {
+  bg_job *j = (bg_job *)arg;
+  proto_info pi;
+  memset(&pi, 0, sizeof(pi));
+  if (j->first) proto_inspect(j->first, (size_t)j->flen, &pi);
+  int np = strategy_preset_count(), found = 0, made = 0;
+  if (j->ask) {
+    /* Still no address of it answering a while later: now the last way out
+     * is asked for (which starts it, or asks the user). Answering again, it
+     * was the network, and nothing is said. */
+    for (uint64_t until = now_ms() + BG_ASK_MS; now_ms() < until && bg_alive(j); ) sleep_ms(250);
+    int fam = 0;
+    if (bg_alive(j) && bg_try(j, &pi, ATT_PLAIN, &fam) != 1 && bg_alive(j) && !fallback_alive()) {
+      proxy_ref x = fallback_ref();
+      proxy_report(&x, "does not answer", j->fbkey);
+    }
+    found = 1;   /* nothing more to do for it */
+  }
+  for (int round = 0; round < 3 && !found; round++) {
+    /* In short sleeps: the engine may stop, or the name leave the last way out. */
+    for (uint64_t until = now_ms() + (uint64_t)(j->first ? BG_REST_MS[round] : BG_REST_ADDR_MS[round]); now_ms() < until && bg_alive(j); ) sleep_ms(250);
+    if (!bg_alive(j)) break;
+    int cand[ATT_MAX], n = 0;
+    if (!j->first) {
+      cand[n++] = ATT_PLAIN;
+    } else if (round == 0) {
+      unsigned avoid = pi.kind == PROTO_TLS ? av_get(j->key) : 0;
+      for (int k = 0; k < np && n < ATT_MAX; k++) {
+        int i = (j->from + k) % np;
+        if (i < 32 && ((j->tried >> i) & 1u)) continue;
+        if (preset_fits(i, avoid)) cand[n++] = i;
+      }
+    } else {
+      int from, learned, inherited, stale, site_from;
+      ladder_start(j->key, 0, &from, &learned, &inherited, &stale, &site_from);
+      cand[n++] = ATT_PLAIN;
+      if (learned >= 0 && learned < np) cand[n++] = learned;
+    }
+    for (int a = 0; a < n && !found && bg_alive(j); a++) {
+      int fam = 0;
+      int r = bg_try(j, &pi, cand[a], &fam);
+      if (r < 0) break;                      /* not reachable now: this round is over */
+      made++;
+      if (r != 1) continue;
+      found = 1;
+      int c = cand[a];
+      if (j->first && c >= 0) {
+        hs_put(j->key, c);
+        report("bypass", j->key, strategy_preset(c)->name, made, fam, NULL);
+      }
+      rs_drop(j->key);
+      cool_drop(j->key);
+      fb_drop(j->fbkey);
+      if (j->first) fb_drop_site(j->fbkey);
+      char h[256];
+      json_host(h, sizeof(h), j->fbkey);
+      engine_printf("{\"type\":\"direct\",\"host\":\"%s\",\"strategy\":\"%s\"}\n",
+                    h, j->first && c >= 0 ? strategy_preset(c)->name : "");
+    }
+  }
+  mutex_lock(&g_bg_mx);
+  g_bg[j->slot].host[0] = 0;
+  mutex_unlock(&g_bg_mx);
+  free(j->first);
+  free(j);
+  return NULL;
+}
+
+/* Start the search for a name the last way out has just taken over. first:
+ * the app's first payload (copied), or NULL with flen 0. ask: instead, a
+ * name no address of answers while the last way out is not running (see
+ * BG_ASK_MS). */
+static void bg_start(const char *fbkey, const char *key, const char *dial_host, uint16_t port, int doh,
+                     const uint8_t *first, int flen, uint32_t tried, int from, int ask) {
+  if (!fbkey[0] || strlen(fbkey) >= sizeof(g_bg[0].host) || (!ask && (conns_tor(fbkey) || cuts_many(fbkey)))) return;
+  if (first && flen > 0) {
+    proto_info pi;
+    proto_inspect(first, (size_t)flen, &pi);
+    if (pi.kind == PROTO_UNKNOWN || !retry_safe(&pi, first, flen)) return;
+  }
+  bg_job *j = (bg_job *)calloc(1, sizeof(*j));
+  if (!j) return;
+  if (first && flen > 0) {
+    j->first = (uint8_t *)malloc((size_t)flen);
+    if (!j->first) { free(j); return; }
+    memcpy(j->first, first, (size_t)flen);
+    j->flen = flen;
+  }
+  snprintf(j->fbkey, sizeof(j->fbkey), "%s", fbkey);
+  snprintf(j->key, sizeof(j->key), "%s", key && key[0] ? key : fbkey);
+  snprintf(j->dial_host, sizeof(j->dial_host), "%s", dial_host);
+  j->port = port; j->doh = doh; j->tried = tried; j->from = from < 0 ? 0 : from; j->ask = ask;
+  j->gen = atomic_load(&g_generation);
+  j->slot = -1;
+  mutex_lock(&g_bg_mx);
+  for (int i = 0; i < BG_MAX; i++) if (g_bg[i].host[0] && strcmp(g_bg[i].host, fbkey) == 0) { j->slot = -2; break; }
+  for (int i = 0; i < BG_MAX && j->slot == -1; i++) if (!g_bg[i].host[0]) { j->slot = i; snprintf(g_bg[i].host, sizeof(g_bg[i].host), "%s", fbkey); }
+  mutex_unlock(&g_bg_mx);
+  if (j->slot >= 0 && thread_spawn(bg_thread, j, 256 * 1024) == 0) return;
+  if (j->slot >= 0) { mutex_lock(&g_bg_mx); g_bg[j->slot].host[0] = 0; mutex_unlock(&g_bg_mx); }
+  /* No room to look again later: said now, as it always was. */
+  if (ask && j->slot == -1 && !fallback_alive()) { proxy_ref x = fallback_ref(); proxy_report(&x, "does not answer", fbkey); }
+  free(j->first);
+  free(j);
+}
+
+static void bg_search(const char *fbkey, const char *key, const char *dial_host, uint16_t port, int doh,
+                      const uint8_t *first, int flen, uint32_t tried, int from) {
+  bg_start(fbkey, key, dial_host, port, doh, first, flen, tried, from, 0);
+}
+
 /* ── the last way out (--fallback-file) ──────────────────────────────────
  * Only where it may be used: set, the user's own server not (that one
  * carries everything already), and a destination off this computer and its
  * network. */
+/* Public DNS resolvers, by name and by address (the ones Shroudly's own
+ * encrypted DNS goes to through the engine, and the well-known ones apps and
+ * browsers use). Never the last way out's: a resolver that cannot be reached
+ * has others beside it, and lookups through Tor would make every site slow.
+ * It was asked for all the same: "Open cloudflare-dns.com through Tor?" on
+ * Türk Telekom the moment the phone changed network, and Tor started for
+ * 194.242.2.2 in Iran, both of them Shroudly's own lookups. A name matches
+ * itself and the names under it. */
+static const char *const DNS_RESOLVERS[] = {
+  "cloudflare-dns.com", "one.one.one.one", "dns.google", "dns.quad9.net", "adguard-dns.com", "dns.adguard.com",
+  "doh.opendns.com", "dns.opendns.com", "doh.sb", "dns.sb", "dns.mullvad.net", "dns.nextdns.io",
+  "1.1.1.1", "1.0.0.1", "162.159.36.1", "162.159.46.1", "104.16.248.249", "104.16.249.249",
+  "8.8.8.8", "8.8.4.4", "9.9.9.9", "149.112.112.112", "94.140.14.140", "94.140.14.141", "94.140.14.14", "94.140.15.15",
+  "208.67.222.222", "208.67.220.220", "185.222.222.222", "45.11.45.11", "194.242.2.2",
+  "2606:4700:4700::1111", "2606:4700:4700::1001", "2001:4860:4860::8888", "2001:4860:4860::8844",
+  "2620:fe::fe", "2a10:50c0::1:ff", "2620:119:35::35",
+};
+/* Equal, ASCII letters in either case (strcasecmp is not in every C library
+ * the engine is built with: Windows on ARM has none). */
+static int same_ci(const char *a, const char *b) {
+  for (; *a && *b; a++, b++) if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+  return *a == *b;
+}
+static int dns_resolver(const char *h) {
+  size_t hl = strlen(h);
+  for (size_t i = 0; i < sizeof(DNS_RESOLVERS) / sizeof(DNS_RESOLVERS[0]); i++) {
+    const char *r = DNS_RESOLVERS[i];
+    size_t rl = strlen(r);
+    if (hl == rl && same_ci(h, r)) return 1;
+    if (hl > rl && h[hl - rl - 1] == '.' && !strchr(r, ':') && !isdigit((unsigned char)r[rl - 1]) && same_ci(h + hl - rl, r)) return 1;
+  }
+  return 0;
+}
+
 static int fallback_ok(const char *host) {
-  return g_cfg.fallback_kind && !g_cfg.upstream_kind && host[0] && upstream_carries(host);
+  return g_cfg.fallback_kind && !g_cfg.upstream_kind && host[0] && upstream_carries(host) && !dns_resolver(host);
 }
 
 /* A name it carried, said once while it keeps carrying it (fb_put). */
@@ -3961,14 +4769,18 @@ static void fallback_tell(const char *host) {
 /* A name it carries already: straight through it, as via_upstream does.
  * 0: carried (or the client gone); -1: it would not carry it, nothing has
  * been said to the client, and the usual way is still open. A name it had
- * not been carrying is said (fallback_tell). */
-static int via_fallback(sock_t client, socks_req *rq) {
+ * not been carrying is said (fallback_tell). again: NULL, or the name to
+ * connect to when looking whether it is reachable again. */
+static int via_fallback(sock_t client, socks_req *rq, const char *again) {
   proxy_ref x = fallback_ref();
   sock_t up = proxy_open(&x, rq->host, rq->port);
   if (up == SOCK_INVALID) { fb_drop(rq->host); return -1; }
   if (socks_reply(client, rq, 1) != 0) { sock_close(up); return 0; }
   if (rq->head && rq->head_len > 0 && sock_send_all(up, (const uint8_t *)rq->head, (size_t)rq->head_len, 0) != 0) { sock_close(up); return 0; }
   if (fb_put(rq->host)) fallback_tell(rq->host);
+  /* Taken because no address of it could be reached: looked at again later
+   * (bg_search), since a network that was down for a moment looks the same. */
+  if (again) bg_search(rq->host, rq->host, again, rq->port, g_cfg.use_doh, NULL, 0, 0, 0);
   atomic_fetch_add(&g_stats.fallback, 1);
   conns_route(t_conn, CONN_TOR);
   relay(client, up, NULL);
@@ -3998,11 +4810,10 @@ static void handle(sock_t client) {
   if (rq.cmd == 0x03) { udp_associate(client, &rq); goto done; }
   /* Listed by name from here on (conns.h). */
   t_conn = conns_begin(rq.host);
-  /* A stand-in address that outlived its mapping: "not allowed", at once. */
-  if (host_in_fake_net(rq.host)) {
-    if (rq.ver == 4) socks4_reply(client, 0x5B); else if (rq.ver == 1 || rq.ver == 2) socks_reply(client, &rq, 0); else socks5_reply(client, 0x02);
-    goto done;
-  }
+  /* A stand-in address that outlived its mapping: the name the app means is
+   * in what it sends first (standin_name), and it goes on by that name. */
+  if (host_in_fake_net(rq.host) && !standin_name(client, &rq)) goto done;
+  if (rq.answered) conns_name(t_conn, rq.host);
   snprintf(dial_host, sizeof(dial_host), "%s", rq.host);
 
   first = (uint8_t *)malloc(RELAY_BUF);
@@ -4011,15 +4822,27 @@ static void handle(sock_t client) {
   if (!first || !work || !rbuf) { socks_reply(client, &rq, 0); goto done; }
 
   /* A name on the ad and tracker list: not looked up, not connected to. */
-  if (!ip_literal(rq.host) && adblock_blocked(rq.host)) { adblock_refuse(client, &rq, first, -1); goto done; }
+  if (!ip_literal(rq.host) && adblock_blocked(rq.host)) { adblock_refuse(client, &rq, first, -1, rq.host); goto done; }
   /* A name the user blocked in the Connections list. */
   if (!ip_literal(rq.host) && conns_blocked(rq.host)) { user_refuse(client, &rq, first, -1); goto done; }
+
+  /* Only listed names are worked on, and this is not one: out as it is. */
+  if (!rq.blockpage && conns_only_skip(rq.host)) { via_plain(client, &rq); goto done; }
 
   /* The user's own server carries it (see via_upstream). */
   if (g_cfg.upstream_kind && upstream_carries(rq.host)) { via_upstream(client, &rq, first); goto done; }
 
+  /* A name the user sends through Tor (the Connections list): the last way
+   * out first, for a site that turns the user's country away itself. Not
+   * running yet, that is said with the name (proxy_report), which starts it
+   * or asks the user, and the usual way goes on meanwhile. */
+  if (!rq.blockpage && fallback_ok(rq.host) && conns_tor(rq.host) && via_fallback(client, &rq, NULL) == 0) goto done;
+
   /* The last way out carries this name already (see fb_put). */
-  if (!rq.blockpage && fallback_ok(rq.host) && fb_is(rq.host) && via_fallback(client, &rq) == 0) goto done;
+  if (!rq.blockpage && fallback_ok(rq.host) && fb_is(rq.host) && via_fallback(client, &rq, NULL) == 0) goto done;
+  /* The network keeps cutting it once open (cuts_many): the last way out
+   * first; not running, it is said and the techniques go on. */
+  if (!rq.blockpage && fallback_ok(rq.host) && cuts_many(rq.host) && via_fallback(client, &rq, NULL) == 0) goto done;
 
   if (rq.blockpage) {
     /* The client looked the name up itself and the system's DNS answered with
@@ -4032,7 +4855,7 @@ static void handle(sock_t client) {
     proto_info pi0;
     memset(&pi0, 0, sizeof(pi0));
     if (flen > 0) proto_inspect(first, (size_t)flen, &pi0);
-    if (pi0.host[0] && adblock_blocked(pi0.host)) { adblock_refuse(client, &rq, first, flen); goto done; }
+    if (pi0.host[0] && adblock_blocked(pi0.host)) { adblock_refuse(client, &rq, first, flen, pi0.host); goto done; }
     if (pi0.host[0]) conns_name(t_conn, pi0.host);
     if (pi0.host[0] && conns_blocked(pi0.host)) { user_refuse(client, &rq, first, flen); goto done; }
     if (pi0.host[0] && !doh_local_name(pi0.host)) {
@@ -4096,8 +4919,14 @@ static void handle(sock_t client) {
       /* No answer in time: still ND_TRY, so the next connection asks again. */
     }
     /* No address of it reachable at all (a site blocked by its addresses):
-     * the last way out, where there is one. */
-    if (up == SOCK_INVALID && !rq.blockpage && fallback_ok(rq.host) && via_fallback(client, &rq) == 0) goto done;
+     * the last way out, where there is one. Not for a name encrypted DNS
+     * says does not exist: Tor cannot reach it either, and would only be
+     * started for nothing. */
+    if (up == SOCK_INVALID && !rq.blockpage && fallback_ok(rq.host) && !(di.resolved == 0 && doh_no_such_name(rq.host))) {
+      if (fallback_alive()) { if (via_fallback(client, &rq, rq.host) == 0) goto done; }
+      /* Not running: asked for only if the name stays out of reach (BG_ASK_MS). */
+      else bg_start(rq.host, rq.host, rq.host, rq.port, g_cfg.use_doh, NULL, 0, 0, 0, 1);
+    }
     if (up == SOCK_INVALID) {
       /* Told while the app is still connected to us (see RAW_HOLD_MS); not
        * where nobody could look (--auth-file: the tunnel on Android). */
@@ -4124,6 +4953,12 @@ static void handle(sock_t client) {
   int told = 0;      /* the connection's fate is already in the log */
   int gave_up = 0;   /* the ladder ended with nothing answered: blocked, or unreachable */
   int race_head = race_head_ms(di.rtt_ms);
+  uint32_t tried = 0;   /* techniques this connection's ladder tried, for bg_search */
+  int tried_last = -1;
+  int tried_all = 0;    /* ... and it tried every one it had */
+  int site_short = 0;   /* a name whose site the last way out carries: the list quickly (fb_site_is) */
+  int no_address = 0;   /* its addresses stopped taking connections in the middle of the ladder */
+  int hand_over = 0;    /* the ladder gave up in a way that makes the name the last way out's */
 
   if (flen > 0) {
     proto_info pi;
@@ -4131,7 +4966,7 @@ static void handle(sock_t client) {
     /* Asked for by address (the app looked the name up itself): the name it
      * means is in the payload, and a listed one ends here. */
     if (ip_literal(rq.host) && pi.host[0] && adblock_blocked(pi.host)) {
-      adblock_refuse(client, &rq, first, flen);
+      adblock_refuse(client, &rq, first, flen, pi.host);
       goto done;
     }
     if (ip_literal(rq.host) && pi.host[0] && conns_blocked(pi.host)) {
@@ -4191,7 +5026,7 @@ static void handle(sock_t client) {
       int cand[ATT_MAX]; int ncand = 0;
       int np = strategy_preset_count();
       int from = -1, learned = -1, inherited = 0, stale = 0, site_from = 0;
-      ladder_start(key, watch_tls, &from, &learned, &inherited, &stale, &site_from);
+      ladder_start(key, watch_tls ? 1 : 2, &from, &learned, &inherited, &stale, &site_from);
       if (learned >= np) learned = -1;
       /* Kinds of technique this name's server turned out not to take (see
        * hs_on_refused): left out of the ladder altogether. */
@@ -4202,7 +5037,11 @@ static void handle(sock_t client) {
       memset(&st, 0, sizeof(st));
       st.key = key; st.pi = &pi; st.tls = watch_tls;
       st.learned = learned; st.inherited = inherited;
-      st.L.max = cool_is(key) ? LEG_COOL_MAX : LEG_MAX;
+      /* A name that rests (COOL_MS, or EX_MS after its whole list failed)
+       * keeps to two connections. Not one that rests with no whole pass on
+       * record where there is a last way out: that pass is what the last way
+       * out waits for (hand_over), so it is made now. */
+      st.L.max = (ex_recent(key) || (cool_is(key) && !fallback_ok(rq.host))) ? LEG_COOL_MAX : LEG_OPEN;
       if (resumed || (learned >= 0 && stale && watch_tls)) {
         /* A race: the untouched request goes first and has a moment to itself
          * (race_head), then the technique goes out beside it on a connection
@@ -4242,7 +5081,13 @@ static void handle(sock_t client) {
         if (learned >= 0 && ncand < ATT_MAX) cand[ncand++] = ATT_PLAIN;
       }
 
-      uint64_t deadline = now_ms() + (fallback_ok(rq.host) && fb_site_is(key) && fallback_alive() ? ATT_BUDGET_FB_MS : ATT_BUDGET_MS);
+      /* Another name of a site the last way out carries: the whole list,
+       * quickly (see fb_site_is). */
+      site_short = watch_tls && fallback_ok(rq.host) && fb_site_is(key) && fallback_alive();
+      uint64_t ladder_t0 = now_ms();
+      uint64_t deadline = ladder_t0 + ATT_BUDGET_MS;
+      int burst = 0, in_batch = 0;   /* the rest of the list at once (BURST_BATCH) */
+      int follows = 0;               /* ... by another connection to the name: this one waited for it */
       int last_preset = -1;     /* the last technique that actually went out */
       int local_fails = 0;      /* attempts our own send failed for a reason of ours */
       int win = -1, rep_fam = fam;
@@ -4251,6 +5096,13 @@ static void handle(sock_t client) {
         int head = st.race && a == 0;
         int wait_ms = c == ATT_PLAIN ? (head ? race_head : VERIFY_PLAIN_MS)
                     : (st.silent && !st.saw_refusal) ? VERIFY_SILENT_MS : VERIFY_DESYNC_MS;
+        if (site_short && a == 0 && !head && c == ATT_PLAIN) wait_ms = race_head;
+        /* In a batch: only its last attempt waits, for all of them. */
+        int mid = 0;
+        if (burst) {
+          mid = ++in_batch < (site_short ? BURST_SITE : BURST_BATCH) && a + 1 < ncand;
+          if (mid) wait_ms = BURST_GAP_MS; else { in_batch = 0; wait_ms = VERIFY_SILENT_MS; }
+        }
         leg cur = { SOCK_INVALID, fam, 0, 0, c, a, 0 };
         if (a == 0) {
           cur.s = up; up = SOCK_INVALID;   /* owned by the ladder from here on */
@@ -4285,7 +5137,7 @@ static void handle(sock_t client) {
             if (cur.s == SOCK_INVALID && !di.cut) {
               /* Refused at every address, or silent there for a full try. */
               report_unreachable(dial_host, rq.port, &di);
-              told = 1; gave_up = 1;
+              told = 1; gave_up = 1; no_address = 1;
               break;
             }
             t = now_ms();
@@ -4311,7 +5163,7 @@ static void handle(sock_t client) {
         rep_fam = cur.fam;
         memcpy(work, first, (size_t)flen);   /* strategies may rewrite in place */
         cur.sent = flen; cur.at = now_ms();
-        if (c >= 0) last_preset = c;
+        if (c >= 0) { last_preset = c; tried_last = c; if (c < 32) tried |= 1u << c; }
         int r = attempt_send(cur.s, cur.fam, work, RELAY_BUF, flen, &pi, c);
         st.made++;
         if (r != 0) {
@@ -4325,20 +5177,90 @@ static void handle(sock_t client) {
           if (cur.room) room_give();
         } else {
           legs_add(&st.L, cur);
-          r = await_legs(&st, wait_ms, rbuf, RELAY_BUF, &rlen, &win);
+          int quick = UNHEARD_MS + 3 * di.rtt_ms;
+          if (quick > UNHEARD_MAX_MS) quick = UNHEARD_MAX_MS;
+          if (a == 0 && !head && wait_ms > quick) {
+            r = await_legs(&st, quick, rbuf, RELAY_BUF, &rlen, &win);
+            if (r == ATT_SILENT) {
+              if (legs_unheard(&st.L)) { st.silent++; if (!watch_tls) st.dropped = 1; }
+              else r = await_legs(&st, wait_ms - quick, rbuf, RELAY_BUF, &rlen, &win);
+            }
+          } else {
+            r = await_legs(&st, wait_ms, rbuf, RELAY_BUF, &rlen, &win);
+          }
+          /* A batch's wait is for all of its connections: one of them being
+           * refused (a server that will not take that technique) does not
+           * end it for the others. */
+          if (burst && !mid) {
+            uint64_t end = cur.at + (uint64_t)wait_ms;
+            while (r == ATT_REFUSED && st.L.n > 0 && now_ms() < end)
+              r = await_legs(&st, (int)(end - now_ms()), rbuf, RELAY_BUF, &rlen, &win);
+          }
           if (r == ATT_OK) break;
+          if (r == ATT_SILENT && mid) continue;   /* the batch's wait is its last attempt's */
           if (r == ATT_SILENT && !head) {
             if (a == 0 && st.opened_learned && watch_tls) st.first_failed = 1;
-            if (++st.silent >= 2 && !st.saw_refusal && !watch_tls) {
+            if (site_short && a == 0) st.silent++;   /* its site is known to be dropped: one silence is enough */
+            if (++st.silent >= 2 && !st.saw_refusal && !watch_tls && !st.dropped) {
               /* Twice now the far end simply said nothing to a plain HTTP
-               * request, and nothing has ever been refused. That is a slow or
-               * unreachable server far more often than a censored one, and
-               * working through ten more techniques would only make an already
-               * slow page slower. Wait on what is open. (A TLS handshake keeps
-               * going: a silent drop is how some filters work, Turkcell
-               * Superonline's for one.) */
+               * request, and nothing has ever been refused. That is a slow
+               * server far more often than a censored one, and a slow one is
+               * not sent the request again and again: wait on what is open.
+               * Unless the request never arrived (legs_unheard): then it is
+               * the network dropping it without a word, as Türk Telekom does
+               * to an http:// site it blocks, and the ladder goes on as a TLS
+               * one does (Turkcell Superonline drops those the same way).
+               * Until 2.6.75 it always stopped here: such a site never
+               * opened, by a technique or by the last way out, and nothing
+               * was said about it. */
+              if (!legs_unheard(&st.L)) break;
+              st.dropped = 1;
+            }
+          }
+          /* The raced untouched request of a name whose site the last way
+           * out carries: that silence is enough too. */
+          if (r == ATT_SILENT && head && site_short && st.silent < 2) st.silent = 2;
+          /* A network that drops without a word: the rest of the list at
+           * once (BURST_BATCH). Not for a name that rests (COOL_MS). */
+          if (r == ATT_SILENT && !burst && !follows && st.silent >= 2 && (watch_tls || st.dropped || st.saw_refusal)
+              && st.L.max > LEG_COOL_MAX && a + 1 < ncand && a + 2 < ATT_MAX) {
+            if (!burst_take(key)) {
+              /* Another connection is going through the list for this
+               * name: wait for what it finds, listening to what is open
+               * here meanwhile. A technique it learned is what this one
+               * tries next, and all it tries; if it found none, this one
+               * is over too (and the name the last way out's: ex_recent). */
+              follows = 1;
+              uint64_t until = now_ms() + 12000;
+              if (until > ladder_t0 + ATT_BUDGET_ALL_MS) until = ladder_t0 + ATT_BUDGET_ALL_MS;
+              if (until > deadline) deadline = until + VERIFY_SILENT_MS + ATT_MIN_LEFT_MS;
+              r = ATT_SILENT;
+              while (now_ms() < until && burst_on(key) && !ex_recent(key)) {
+                r = await_legs(&st, 300, rbuf, RELAY_BUF, &rlen, &win);
+                if (r == ATT_OK) break;
+              }
+              if (r == ATT_OK) break;
+              int f2, l2, i2, s2, sf2;
+              ladder_start(key, 0, &f2, &l2, &i2, &s2, &sf2);
+              if (l2 >= 0 && l2 < np && !(l2 < 32 && ((tried >> l2) & 1u))) {
+                /* Twice, if need be: one attempt lost on the way is not
+                 * the end of a connection that has nothing else to try. */
+                cand[a + 1] = l2; cand[a + 2] = l2; ncand = a + 3;
+                continue;
+              }
+              report_gave_up(&st, local_fails, rep_fam);
+              told = 1; gave_up = 1;
               break;
             }
+            burst = 1;
+            st.L.max = LEG_MAX;
+            int rest = ncand - (a + 1);
+            int per = site_short ? BURST_SITE : BURST_BATCH;
+            uint64_t need = (uint64_t)((rest + per - 1) / per) * VERIFY_SILENT_MS
+                          + (uint64_t)rest * (uint64_t)(BURST_GAP_MS + 2 * di.rtt_ms + 20) + ATT_MIN_LEFT_MS + 500;
+            uint64_t t = now_ms();
+            if (t + need > deadline) deadline = t + need;
+            if (deadline > ladder_t0 + ATT_BUDGET_ALL_MS) deadline = ladder_t0 + ATT_BUDGET_ALL_MS;
           }
         }
         if (!head || r != ATT_SILENT) atomic_fetch_add(&g_stats.probe_fail, 1);
@@ -4348,23 +5270,31 @@ static void handle(sock_t client) {
            * used, and whether the network refused them or dropped them. */
           report_gave_up(&st, local_fails, rep_fam);
           told = 1; gave_up = 1;
+          /* The whole list, and not one answered: only now is it the last
+           * way out's (see BURST_BATCH). */
+          if (a + 1 >= ncand && !follows) { tried_all = 1; ex_put(key); }
           break;
         }
       }
 
-      /* Where this host's next ladder starts (see ladder_start). TLS only: the other
-       * ladders stop at the second silence instead of walking the list. One
-       * that met a refusal walks it quickly enough, and starts from the top. */
-      if (win < 0 && watch_tls) {
-        if (gave_up && !st.saw_refusal && st.silent > 0 && last_preset >= 0)
-          rs_put(key, (last_preset + 1) % np);
+      /* Where this host's next ladder starts (see ladder_start). TLS, and
+       * plain HTTP the network dropped: the other ladders stop at the second
+       * silence instead of walking the list. One that met a refusal walks it
+       * quickly enough, and starts from the top. */
+      if (win < 0 && (watch_tls || st.dropped)) {
+        if (gave_up && st.silent > 0 && last_preset >= 0 && (!st.saw_refusal || !tried_all))
+          rs_put(key, (last_preset + 1) % np, !watch_tls);
         else if (gave_up) rs_drop(key);
         /* The site's next name carries on after the last technique tried here
          * (see ladder_start), refused or dropped alike: the point is to reach
          * the techniques this ladder had no time for. */
         char site[256];
-        if (gave_up && last_preset >= 0 && site_key(key, site, sizeof(site))) rs_put(site, (last_preset + 1) % np);
+        if (gave_up && last_preset >= 0 && site_key(key, site, sizeof(site))) rs_put(site, (last_preset + 1) % np, !watch_tls);
       }
+      /* The last way out's only when the whole list was tried: by this ladder,
+       * or by one before it not long ago (a name that rests does not walk it
+       * again); or when its addresses stopped answering. */
+      hand_over = gave_up && (tried_all || no_address || ex_recent(key));
       /* Nothing answered: for a while, its next ladders keep fewer connections
        * open (see COOL_MS). One that answers late, in the race below, ends
        * that again. */
@@ -4373,12 +5303,13 @@ static void handle(sock_t client) {
       int pick = win;   /* the connection to relay */
       if (win < 0 && st.L.n > 0) {
         const char *fbt = (ip_literal(rq.host) && cut_key[0]) ? cut_key : rq.host;
-        uint64_t race_ms = gave_up && fallback_ok(rq.host) && fallback_ok(fbt) && fallback_alive() ? RACE_FB_MS : RACE_MAX_MS;
+        uint64_t race_ms = gave_up && hand_over && fallback_ok(rq.host) && fallback_ok(fbt) && fallback_alive() ? RACE_FB_MS : RACE_MAX_MS;
         int rr = race_legs(&st, client, rbuf, RELAY_BUF, &rlen, &win, first, &flen, race_ms);
         if (rr == 1) pick = win;
         else if (rr == 2) pick = 0;   /* the oldest: on a fresh ladder, the untouched request */
       }
       if (win >= 0) ladder_won(&st, &st.L.l[win]);
+      if (burst) burst_give(key);
       /* The network's own DNS (see there): its address got through, or did
        * not; or every technique failed at our own resolver's addresses. */
       if (watch_tls && nd) {
@@ -4409,11 +5340,14 @@ static void handle(sock_t client) {
     }
   }
 
-  /* Every technique tried and nothing answered: the same request through
-   * the last way out, where there is one; the name then goes straight there
-   * for a while (see fb_put). The connection kept in case the site answers
-   * late is let go: the last way out is the better bet by now. */
-  if (gave_up && rlen == 0 && flen > 0) {
+  /* Every technique tried and nothing answered (hand_over): the same request
+   * through the last way out, where there is one; the name then goes
+   * straight there for a while (see fb_put). The connection kept in case the
+   * site answers late is let go: the last way out is the better bet by now.
+   * A ladder that only ran out of time is not that: its connections are
+   * listened to as before there was a last way out, and the name's next
+   * ladder carries on down the list. */
+  if (gave_up && hand_over && rlen == 0 && flen > 0) {
     const char *target = (ip_literal(rq.host) && cut_key[0]) ? cut_key : rq.host;
     if (fallback_ok(rq.host) && fallback_ok(target)) {
       proxy_ref x = fallback_ref();
@@ -4422,6 +5356,9 @@ static void handle(sock_t client) {
         if (up != SOCK_INVALID) sock_close(up);
         up = fb; fam = 0;
         if (fb_put(target)) fallback_tell(target);
+        /* The rest of the list, behind it. */
+        bg_search(target, cut_key[0] ? cut_key : target, dial_host, rq.port, dial_doh, first, flen, tried,
+                  tried_last >= 0 ? (tried_last + 1) % strategy_preset_count() : 0);
         atomic_fetch_add(&g_stats.fallback, 1);
         conns_route(t_conn, CONN_TOR);
         used_cand = ATT_PLAIN;
@@ -4452,12 +5389,22 @@ static void handle(sock_t client) {
     cw.cand = used_cand;
     if (rlen > 0) tls_follow(&cw.tt, rbuf, rlen);
     relay(client, up, &cw);
-    if (cw.host && used_cand >= 0 && used_cand < strategy_preset_count() && client_refused(&cw)) {
+    /* Only a technique that changes what the server is given can be the
+     * cause: a ClientHello in records (TLSREC) or a decoy (FAKE). One that
+     * only cuts the TCP stream hands the server the very same bytes, so the
+     * certificate is the site's own whatever the app did next; taking such an
+     * app's alert for a refusal (the Roblox app, closing connections it no
+     * longer wants) threw away a technique that worked, one after another,
+     * and with it parts of the game. */
+    if (cw.host && used_cand >= 0 && used_cand < strategy_preset_count()
+        && preset_traits(strategy_preset(used_cand)) && client_refused(&cw)) {
       int next = hs_on_refused(cw.host, used_cand);
       char h[256];
       json_host(h, sizeof(h), cw.host);
-      engine_printf("{\"type\":\"refused\",\"host\":\"%s\",\"strategy\":\"%s\",\"next\":\"%s\"}\n",
-                    h, strategy_preset(used_cand)->name, next >= 0 ? strategy_preset(next)->name : "");
+      /* avoid: the kinds now left out for it, for the app to keep and give
+       * back after a restart (AVOID), where this table starts empty. */
+      engine_printf("{\"type\":\"refused\",\"host\":\"%s\",\"strategy\":\"%s\",\"next\":\"%s\",\"avoid\":%u}\n",
+                    h, strategy_preset(used_cand)->name, next >= 0 ? strategy_preset(next)->name : "", av_get(cw.host));
     }
     if (!raw_done) {
       /* Any answer at all: it got through. Nothing, and the server ended it:
@@ -4541,6 +5488,8 @@ static void engine_init_once(void) {
   mutex_init(&g_win_mx);
   mutex_init(&g_cool_mx);
   mutex_init(&g_fb_mx);
+  mutex_init(&g_cuts_mx);
+  mutex_init(&g_bg_mx);
   conns_init();
   mutex_init(&g_seen_mx);
   mutex_init(&g_raw_mx);
@@ -4594,6 +5543,28 @@ void engine_fallback_forget(void) {
   mutex_lock(&g_fb_mx);
   memset(g_fb, 0, sizeof(g_fb));
   mutex_unlock(&g_fb_mx);
+  cuts_forget();
+  ex_forget();
+}
+
+/* UNTOR: the name and every name under it leave the last way out's list
+ * too, so their next connections take the usual way at once. */
+void engine_fallback_drop(const char *name) {
+  char n[256];
+  size_t nl = 0;
+  while (name && *name == ' ') name++;
+  for (; name && name[nl] && nl + 1 < sizeof(n); nl++) n[nl] = (char)tolower((unsigned char)name[nl]);
+  n[nl] = 0;
+  if (!nl) return;
+  mutex_lock(&g_fb_mx);
+  for (int i = 0; i < FB_SLOTS; i++) {
+    /* A range (UNTOR address/bits): the addresses in it it carried. */
+    if (strchr(n, '/')) { if (g_fb[i].host[0] && conns_in_range(n, g_fb[i].host)) memset(&g_fb[i], 0, sizeof(g_fb[i])); continue; }
+    size_t hl = strlen(g_fb[i].host);
+    if (hl < nl || strcmp(g_fb[i].host + hl - nl, n) != 0) continue;
+    if (hl == nl || g_fb[i].host[hl - nl - 1] == '.') memset(&g_fb[i], 0, sizeof(g_fb[i]));
+  }
+  mutex_unlock(&g_fb_mx);
 }
 
 /* Everything an engine has learned about hosts and resolvers: a start is a
@@ -4610,10 +5581,13 @@ static void engine_forget(void) {
   mutex_unlock(&g_ok_mx);
   mutex_lock(&g_cool_mx);
   memset(g_cool, 0, sizeof(g_cool));
+  memset(g_ex, 0, sizeof(g_ex));
+  memset(g_burst, 0, sizeof(g_burst));
   mutex_unlock(&g_cool_mx);
   mutex_lock(&g_fb_mx);
   memset(g_fb, 0, sizeof(g_fb));
   mutex_unlock(&g_fb_mx);
+  cuts_forget();
   dns_way_forget();
   /* The list by name and the user's blocks: the app gives its blocks again
    * after every start. */
@@ -4667,6 +5641,7 @@ int engine_start(const engine_config *cfg) {
   atomic_store(&g_stats.probe_success, 0);
   atomic_store(&g_stats.probe_fail, 0);
   atomic_store(&g_stats.fallback, 0);
+  atomic_store(&g_stats.udp_in, 0);
   doh_init(cfg->doh_host, cfg->doh_ip);
   engine_forget();
 
@@ -4753,6 +5728,27 @@ void engine_learn(const char *host, int preset) { hs_put(host, preset); }
  * works is replaced by the ladder like any other. 0, or -1 for a name that
  * is not a host, a technique this build does not have, or one that cannot
  * do anything here. */
+/* AVOID <host> <kinds> <seconds ago>: what an earlier run found this name's
+ * server cannot take (hs_on_refused), kept by the app across restarts; the
+ * same TTL from when it was found. 0, or -1 for a bad or stale line. */
+int engine_avoid(const char *host, unsigned mask, uint64_t age) {
+  size_t n = strlen(host);
+  if (n == 0 || n > 253 || ip_literal(host)) return -1;
+  for (size_t i = 0; i < n; i++) {
+    char c = host[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-')) return -1;
+  }
+  mask &= (TRAIT_TLSREC | TRAIT_FAKE);
+  if (!mask || age >= AV_TTL_MS) return -1;
+  uint64_t now = now_ms();
+  mutex_lock(&g_hs_mx);
+  av_add(host, mask);
+  for (int i = 0; i < AV_SIZE; i++)
+    if (g_av[i].used && strcmp(g_av[i].host, host) == 0) { g_av[i].t = now > age ? now - age : 0; break; }
+  mutex_unlock(&g_hs_mx);
+  return 0;
+}
+
 int engine_restore(const char *host, const char *technique, uint64_t age) {
   size_t n = strlen(host);
   if (n == 0 || n > 253) return -1;
@@ -4773,6 +5769,9 @@ int engine_restore(const char *host, const char *technique, uint64_t age) {
   int p = -1, np = strategy_preset_count();
   for (int i = 0; i < np; i++) if (strcmp(strategy_preset(i)->name, technique) == 0) { p = i; break; }
   if (p < 0 || !preset_usable(strategy_preset(p))) return -1;
+  /* Of a kind this name's server cannot take (AVOID, given first): not
+   * restored, so its first connection does not meet the same refusal. */
+  if (preset_traits(strategy_preset(p)) & av_get(host)) return -1;
   hs_put(host, p);
   uint64_t now = now_ms(), t = now > age ? now - age : 0;
   char site[256];

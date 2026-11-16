@@ -17,6 +17,9 @@ struct SettingsView: View {
     // the running engine at once, no restart.
     @AppStorage(AdBlock.Key.on, store: AppGroup.defaults) private var adBlock = false
     @State private var allowText = AdBlock.allow().joined(separator: "\n")
+    // Only the listed sites through Shroudly's ways (Shared/Conns.swift).
+    @State private var onlyMode = Conns.onlyMode()
+    @State private var onlyText = AppGroup.defaults.string(forKey: Conns.onlyKey) ?? ""
     // "Count me in the live total" (Shared/OnlineCount.swift): on by default.
     @AppStorage(OnlineCount.key, store: AppGroup.defaults) private var countMe = true
     // "DNS server": the kind and address being typed, and the test's result.
@@ -26,8 +29,95 @@ struct SettingsView: View {
     @State private var dnsResult: (ok: Bool, text: String)?
     @State private var dnsTesting = false
 
+    #if !os(tvOS)
+    // The desktop's four tabs of Settings (components/SettingsPanel.js).
+    enum Group: CaseIterable { case general, connection, sharing, app
+        var title: String {
+            switch self {
+            case .general: return tr("tabGeneral")
+            case .connection: return tr("tabConnection")
+            case .sharing: return tr("tabSharing")
+            case .app: return tr("tabApp")
+            }
+        }
+    }
+    #if DEBUG
+    // Screenshots (a debug build only): -ShroudlyGroup connection|sharing|app.
+    @State private var group: Group = Group.allCases.first { "\($0)" == UserDefaults.standard.string(forKey: "ShroudlyGroup") } ?? .general
+    #else
+    @State private var group: Group = .general
+    #endif
+    #else
+    enum Group { case general, connection, sharing, app }
+    #endif
+
+    /* Apple TV: every section on one page, for the remote. */
+    private func show(_ g: Group) -> Bool {
+        #if os(tvOS)
+        return true
+        #else
+        return group == g
+        #endif
+    }
+
     var body: some View {
+        #if os(tvOS)
+        form
+        #else
+        VStack(spacing: 0) {
+            groupBar
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 2)
+            form
+        }
+        .background(Theme.background)
+        #endif
+    }
+
+    #if !os(tvOS)
+    /* The tabs in a rounded box, the chosen one tinted (the desktop's look). */
+    private var groupBar: some View {
+        // All four on one line while every name fits whole, else two by
+        // two, else one under the other; never shrunk or cut.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { ForEach(Group.allCases, id: \.self) { groupButton($0) } }
+            VStack(spacing: 4) {
+                HStack(spacing: 4) { groupButton(.general); groupButton(.connection) }
+                HStack(spacing: 4) { groupButton(.sharing); groupButton(.app) }
+            }
+            VStack(spacing: 4) { ForEach(Group.allCases, id: \.self) { groupButton($0) } }
+        }
+        .padding(4)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.line, lineWidth: 1))
+    }
+
+    private func groupButton(_ g: Group) -> some View {
+        Button { group = g } label: {
+            Text(g.title)
+                .font(.system(size: 13.5, weight: .medium))
+                .lineLimit(1)
+                .fixedSize()
+                .foregroundStyle(group == g ? Theme.accent : Theme.secondaryText)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 38)
+                .background(group == g ? Theme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(group == g ? Theme.accent.opacity(0.38) : .clear, lineWidth: 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+    #endif
+
+    private func saveOnly() {
+        Conns.setOnly(mode: onlyMode, text: onlyText)
+        controller.blocksChanged()
+    }
+
+    private var form: some View {
         Form {
+            if show(.connection) {
             Section {
                 Picker(tr("strategy"), selection: $settings.strategyId) {
                     ForEach(Strategies.all, id: \.id) { s in
@@ -35,11 +125,18 @@ struct SettingsView: View {
                     }
                 }
             }
+            }
+            if show(.app) {
             #if !os(tvOS)
             Section(tr("accentColour")) {
                 AccentPicker()
             }
+            Section(tr("logoChoice")) {
+                LogoPicker()
+            }
             #endif
+            }
+            if show(.connection) {
             Section(tr("androidNetworkSection")) {
                 Toggle(isOn: $settings.quicOff) {
                     Labelled(title: tr("androidQuicOff"), detail: tr("androidQuicOffDesc"))
@@ -53,17 +150,52 @@ struct SettingsView: View {
                 // The last way out (Tunnel/TorRoute.swift): the Mac only
                 // (iOS ends a tunnel that big; Apple TV has no Tor).
                 #if os(macOS)
+                // Off (the default): Shroudly as the Mac's proxy, as the
+                // desktop app from GitHub (AppSettings.proxyOnly).
+                Toggle(isOn: $settings.macAllApps) {
+                    Labelled(title: tr("macAllApps"), detail: tr("macAllAppsDesc"))
+                }
                 Toggle(isOn: $settings.torLastResort) {
                     Labelled(title: tr("lastResort"), detail: settings.ownServer.isEmpty ? "\(tr("lastResortDesc")) \(tr("lastResortAsks"))" : tr("lastResortOwnServer"))
                 }
                 #endif
             }
+            }
+            if show(.app) {
             Section {
                 Toggle(isOn: $countMe) {
                     Labelled(title: tr("shareOnlineCount"), detail: tr("shareOnlineCountDesc"))
                 }
                 .onChange(of: countMe) { _ in controller.countChanged() }
             }
+            }
+            #if !os(tvOS)
+            if show(.connection) {
+            // Which sites Shroudly works on: all, or only the listed ones,
+            // every other going out as it is (the desktop's "Only listed
+            // sites"); into the running tunnel at once.
+            Section {
+                Toggle(isOn: $onlyMode) {
+                    Labelled(title: tr("routeListed"), detail: onlyMode ? tr("routeListedDesc") : tr("routeAllDesc"))
+                }
+                .onChange(of: onlyMode) { _ in saveOnly() }
+                if onlyMode {
+                    TextEditor(text: $onlyText)
+                        .font(.system(size: 13, design: .monospaced))
+                        .frame(minHeight: 110)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        #endif
+                        .onChange(of: onlyText) { _ in saveOnly() }
+                    Text(tr("siteListHint")).font(.footnote).foregroundStyle(Theme.secondaryText)
+                }
+            } header: {
+                Text(tr("siteListLabel"))
+            }
+            }
+            #endif
+            if show(.connection) {
             Section {
                 Toggle(isOn: $adBlock) {
                     Labelled(title: tr("adBlock"), detail: tr("adBlockDesc"))
@@ -95,6 +227,8 @@ struct SettingsView: View {
                     #endif
                 }
             }
+            }
+            if show(.connection) {
             Section {
                 Text(tr("dnsServerDesc"))
                     .font(.footnote)
@@ -146,6 +280,8 @@ struct SettingsView: View {
             } header: {
                 Text(tr("dnsServer"))
             }
+            }
+            if show(.sharing) {
             Section {
                 Text(tr("ownServerDesc"))
                     .font(.footnote)
@@ -188,6 +324,8 @@ struct SettingsView: View {
             } header: {
                 Text(tr("ownServer"))
             }
+            }
+            if show(.general) {
             Section(tr("language")) {
                 Labelled(title: tr("languageSystem"), detail: tr("appleLanguageDesc"))
                 #if os(iOS)
@@ -196,17 +334,19 @@ struct SettingsView: View {
                 }
                 #endif
             }
+            }
         }
         .formStyle(.grouped)
+        .topRoom(14)
         .listBackgroundHidden()
         .background(Theme.background)
-        .navigationTitle(tr("navSettings"))
         .onChange(of: settings) { new in
             let store = SettingsStore()
             let old = store.load()
             guard old != new else { return }
             // The Tor toggle turned on by hand is the user's yes to it (issue #77).
             if old.torLastResort != new.torLastResort { AppGroup.defaults.set(new.torLastResort, forKey: "torApproved") }
+            if old.torLastResort && !new.torLastResort { AppGroup.defaults.set(Date().timeIntervalSince1970, forKey: "torAskRest") }
             store.save(new)
             Task { await controller.settingsChanged(from: old, to: new) }
         }

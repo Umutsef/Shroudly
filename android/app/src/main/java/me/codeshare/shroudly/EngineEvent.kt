@@ -61,9 +61,19 @@ sealed class EngineEvent {
      * once while it keeps carrying it), or nothing listening there (not ok:
      * Tor is started for the next connection). */
     data class Fallback(val ok: Boolean, val host: String, val why: String) : EngineEvent()
+    /* The app turned down the handshake a technique produced (the server sent
+     * another certificate, #68): the next connection uses `next`; `avoid`, the
+     * kinds now left out for the name (Avoids). */
+    data class Refused(val host: String, val strategy: String, val next: String, val avoid: Int) : EngineEvent()
     /* Apps' lookups go around the tunnel (a Private DNS server, a DNS app):
      * their connections keep coming by address, none by name (dns_way in
      * core/src/engine.c). Once a run. */
+    /* A name the last way out carried is reached without it again (engine.c,
+     * bg_search): by `strategy`, or, empty, as it is. */
+    data class Direct(val host: String, val strategy: String) : EngineEvent() {
+        val line: String get() = if (strategy.isNotEmpty()) "$host: $strategy opens it after all; it no longer goes through the last way out (Tor)"
+            else "$host: reached without the last way out (Tor) again"
+    }
     data class DnsAround(val host: String) : EngineEvent()
     /* What became of the ad and tracker list (ADBLOCK, --adblock), and the
      * engine's verdict on a fetched one (ADBLOCK-CHECK). Never a path. */
@@ -72,6 +82,8 @@ sealed class EngineEvent {
     /* The Connections list (CONNS, core/src/conns.c): one row per name, then the end. */
     data class Conn(val row: Conns.Row) : EngineEvent()
     data class ConnsEnd(val n: Int) : EngineEvent()
+    /* A name the ad and tracker list stopped (CONNS lists the last ones). */
+    data class Ad(val row: Conns.AdRow) : EngineEvent()
     object Stopped : EngineEvent()
     data class Other(val type: String) : EngineEvent()
     data class Text(val line: String) : EngineEvent()
@@ -112,10 +124,13 @@ sealed class EngineEvent {
                 "error" -> Error(str("msg") ?: "code ${num("code")}", (m["code"] as? Number)?.toInt())
                 "upstream" -> Upstream(num("ok") != 0L, str("why") ?: "")
                 "fallback" -> Fallback(num("ok") != 0L, str("host") ?: "", str("why") ?: "")
+                "refused" -> Refused(str("host") ?: "", str("strategy") ?: "", str("next") ?: "", num("avoid").toInt())
+                "direct" -> Direct(str("host") ?: "", str("strategy") ?: "")
                 "dns_around" -> DnsAround(str("host") ?: "")
                 "conn" -> Conn(Conns.Row(str("host") ?: "", num("active").toInt(), num("conns"), num("up"), num("down"),
-                    str("route") ?: "direct", num("blocked") != 0L, num("refused")))
+                    str("route") ?: "direct", num("blocked") != 0L, num("refused"), if (m.containsKey("ago")) num("ago") else -1L))
                 "conns_end" -> ConnsEnd(num("n").toInt())
+                "ad" -> Ad(Conns.AdRow(str("host") ?: "", num("count"), num("ago")))
                 "stopped" -> Stopped
                 else -> Other(type)
             }
@@ -125,6 +140,21 @@ sealed class EngineEvent {
 
 /* The log line for a NetDns event, as the desktop writes it (engine-manager.js). */
 object NetDnsText {
+    /* The same name, address and outcome again (each of a page's
+     * connections asks): said once in AGAIN_MS, as on the desktop. */
+    const val AGAIN_MS = 10 * 60 * 1000L
+    private val said = HashMap<String, Long>()
+
+    @Synchronized
+    fun once(ev: EngineEvent.NetDns, now: Long): Boolean {
+        val k = "${ev.stage} ${ev.host} ${ev.addr}"
+        val at = said[k]
+        if (at != null && now - at in 0 until AGAIN_MS) return false
+        if (said.size > 500) said.clear()
+        said[k] = now
+        return true
+    }
+
     fun line(ev: EngineEvent.NetDns): String = when (ev.stage) {
         "try" -> "${ev.host}: the addresses encrypted DNS gives get nowhere here; trying the one this network's DNS gives (${ev.addr})"
         "ok" -> "${ev.host}: opened at the address this network's DNS gives (${ev.addr})"

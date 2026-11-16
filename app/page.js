@@ -10,16 +10,17 @@ import InfoPanel, { FollowSection } from '../components/InfoPanel';
 import UpdateBanner from '../components/UpdateBanner';
 import Onboarding from '../components/Onboarding';
 import BlockedNotice from '../components/BlockedNotice';
-import Appearance from '../components/Appearance';
+import Appearance, { logoSrc, useLogo } from '../components/Appearance';
 import { SupportBanner, useSupport } from '../components/Support';
 import { HelpBanner, useHelpNudge } from '../components/HelpBanner';
 import { WhatsNewBanner, useWhatsNew } from '../components/WhatsNew';
 import { useUpdate } from '../components/useUpdate';
-import { ChartIcon, InfoIcon, LogsIcon, SettingsIcon, ShieldIcon, UsersIcon } from '../components/icons';
+import { ChartIcon, InfoIcon, LogoIcon, LogsIcon, SettingsIcon, UsersIcon } from '../components/icons';
 import { useLanguage } from '../contexts/LanguageContext';
 
 /* Relative path: the exported app is loaded from file://, where "/logo.png"
-   would resolve to the filesystem root. */
+   would resolve to the filesystem root. The classic logo is the shield alone;
+   another one chosen in Settings is its whole picture (components/Appearance). */
 const LOGO_SRC = './logo.png';
 const CODESHARE_URL = 'https://codeshare.me';
 
@@ -40,6 +41,7 @@ function Footer({ t }) {
 }
 
 export default function Home() {
+  const logo = useLogo();
   const [activeTab, setActiveTab] = useState('control');
   const { t, isLoaded } = useLanguage();
   const [dpiStatus, setDpiStatus] = useState({ active: false, stats: {} });
@@ -128,7 +130,7 @@ export default function Home() {
   const helpCard = activeTab === 'control' && active && !notRouting && !offline && !ownServerDown;
 
   const nav = [
-    { id: 'control',  label: t('navProtection'), Icon: ShieldIcon },
+    { id: 'control',  label: t('navProtection'), Icon: LogoIcon },
     { id: 'stats',    label: t('navStats'),      Icon: ChartIcon },
     { id: 'settings', label: t('navSettings'),   Icon: SettingsIcon },
     { id: 'logs',     label: t('navLogs'),       Icon: LogsIcon },
@@ -145,7 +147,7 @@ export default function Home() {
           the logo said it again) */}
       <header className="no-drag flex items-center gap-3 px-4 py-3 sm:px-5">
         <div className="h-9 w-9 shrink-0">
-          <img src={LOGO_SRC} alt="" draggable={false} className="h-full w-full select-none object-contain" />
+          <img src={logo === 'classic' ? LOGO_SRC : logoSrc(logo)} alt="" draggable={false} className="h-full w-full select-none object-contain" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
@@ -221,12 +223,12 @@ export default function Home() {
               data-tour={`nav-${id}`}
               aria-current={on ? 'page' : undefined}
               title={label}
-              className="nav-btn flex min-w-0 flex-col items-center justify-start gap-1 px-1 pb-2 pt-2.5"
+              className="nav-btn flex min-w-0 flex-col items-center justify-center px-1 py-3.5"
             >
-              <Icon className="h-[22px] w-[22px]" />
-              <span className="nav-label line-clamp-2 w-full text-center text-[clamp(9px,2.6vw,10.5px)] font-medium leading-[1.25]">
-                {label}
-              </span>
+              {/* The icons alone, the cleanest; the name is the tooltip and
+                  what screen readers say. */}
+              <Icon className="h-[23px] w-[23px]" aria-hidden />
+              <span className="sr-only">{label}</span>
             </button>
           );
         })}
