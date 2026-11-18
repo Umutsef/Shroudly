@@ -3,14 +3,50 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* Resolve a strategy position reference to an absolute offset in the payload. */
-static int resolve_pos(pos_ref ref, int offset, int len, const proto_info *pi) {
+/* Second levels under which people register their own names under a
+ * two-letter country domain (co.uk, com.tr): the name's own label is then
+ * the one before them. The same list as GENERIC_SLD in engine.c; a name it
+ * misses only has its cut land one label off, still inside the name. */
+static const char *const SLD_GENERIC[] = {
+  "co", "com", "net", "org", "gov", "edu", "ac", "gen", "biz", "info", "or", "ne", "go",
+  "mil", "int", "nom", "ltd", "plc", "sch", "k12", "gob", "gouv", "govt", NULL
+};
+
+/* Where the name's own label (see POS_SLD) starts and ends, as offsets into
+ * the name h[0..n): sld[0], sld[1]; both -1 when there is no name. A name of
+ * one label is its own label. */
+static void sld_span(const uint8_t *h, int n, int sld[2]) {
+  sld[0] = sld[1] = -1;
+  if (!h || n <= 0) return;
+  if (h[n - 1] == '.') n--;                 /* "example.com." */
+  if (n <= 0) return;
+  int dot[3] = { -1, -1, -1 }, nd = 0;      /* the last three dots, last first */
+  for (int i = n - 1; i >= 0 && nd < 3; i--) if (h[i] == '.') dot[nd++] = i;
+  if (nd == 0) { sld[0] = 0; sld[1] = n; return; }
+  int b = dot[1] + 1, e = dot[0];           /* the second-to-last label */
+  if (n - dot[0] - 1 == 2 && nd >= 2) {     /* a two-letter country domain */
+    for (int i = 0; SLD_GENERIC[i]; i++)
+      if ((int)strlen(SLD_GENERIC[i]) == e - b && memcmp(h + b, SLD_GENERIC[i], (size_t)(e - b)) == 0) {
+        b = dot[2] + 1; e = dot[1]; break;
+      }
+  }
+  if (e <= b) return;                       /* "..com": no label */
+  sld[0] = b; sld[1] = e;
+}
+
+/* Resolve a strategy position reference to an absolute offset in the payload.
+ * sld: the name's own label (sld_span), relative to the name's start. */
+static int resolve_pos(pos_ref ref, int offset, int len, const proto_info *pi, const int sld[2]) {
   int base;
+  int has_sld = pi->host_off >= 0 && sld[0] >= 0;
   switch (ref) {
     case POS_SNI:     base = pi->host_off >= 0 ? pi->host_off : len / 2; break;
     case POS_SNI_MID: base = pi->host_off >= 0 ? pi->host_off + pi->host_len / 2 : len / 2; break;
     case POS_SNI_END: base = pi->host_off >= 0 ? pi->host_off + pi->host_len : len / 2; break;
     case POS_HOST:    base = pi->http_hdr_off >= 0 ? pi->http_hdr_off : len / 2; break;
+    case POS_SLD:     base = has_sld ? pi->host_off + sld[0] : len / 2; break;
+    case POS_MIDSLD:  base = has_sld ? pi->host_off + (sld[0] + sld[1]) / 2 : len / 2; break;
+    case POS_ENDSLD:  base = has_sld ? pi->host_off + sld[1] : len / 2; break;
     case POS_ABS:
     default:          base = offset < 0 ? len + offset : offset; offset = 0; break;
   }
@@ -124,11 +160,133 @@ static int send_oob_at(sock_t up, uint8_t *buf, int len, int pos) {
   return sock_send_all(up, buf + pos, (size_t)(len - pos), 0);
 }
 
+/* ── several TLS records ─────────────────────────────────────────────────
+ * The record that holds absolute position p (strictly inside its body) is
+ * cut in two there, the way tls_insert_record cuts the first one. Used when
+ * a strategy asks for more than one record cut (NoDPI's many records): the
+ * handshake then arrives in three or more records, legal by RFC 8446 §5.1,
+ * so a filter that reassembles records only up to a point, or reads only
+ * the first one or two, never holds the whole name. Only whole records
+ * already here are cut. Returns the new length, or -1. */
+static int tls_split_at(uint8_t *buf, int len, int cap, int p) {
+  int o = 0;
+  while (o + 5 <= len) {
+    if (buf[o] != 0x16) return -1;
+    int rl = (buf[o + 3] << 8) | buf[o + 4];
+    int end = o + 5 + rl;
+    if (end > len) return -1;
+    if (p > o + 5 && p < end) {
+      if (len + 5 > cap) return -1;
+      int n1 = p - (o + 5), n2 = rl - n1;
+      memmove(buf + p + 5, buf + p, (size_t)(len - p));
+      buf[o + 3] = (uint8_t)(n1 >> 8); buf[o + 4] = (uint8_t)n1;
+      buf[p] = buf[o]; buf[p + 1] = buf[o + 1]; buf[p + 2] = buf[o + 2];
+      buf[p + 3] = (uint8_t)(n2 >> 8); buf[p + 4] = (uint8_t)n2;
+      return len + 5;
+    }
+    o = end;
+  }
+  return -1;
+}
+
+/* ── plain HTTP rewrites the RFC allows (tpws) ───────────────────────────
+ * A filter that looks for "Host: blocked.example" byte for byte misses each
+ * of these, while every server takes them: header names are case-
+ * insensitive and so is a host name (RFC 9110 §5.1, §4.2.3); the space
+ * after the colon is optional whitespace, a space or a tab (RFC 9112 §5);
+ * and a server ignores an empty line before the request line (RFC 9112
+ * §2.2). Nothing that changes what is asked for (no trailing dot on the
+ * name, no doubled spaces), so a server can never answer a different
+ * request. Returns the new length (the same, longer or shorter), or len
+ * unchanged when it cannot apply; pi's offsets are moved with the bytes. */
+static int http_rewrite(uint8_t *buf, int len, int cap, proto_info *pi, int m) {
+  int h = pi->http_hdr_off, v = pi->host_off;
+  if (pi->kind != PROTO_HTTP || h < 0 || v < 0 || h + 5 > len || v > len || v < h + 5) return len;
+  if (m & HTTP_DOMCASE) {
+    int up = 1;
+    for (int i = v; i < v + pi->host_len && i < len; i++) {
+      uint8_t c = buf[i];
+      if (c >= 'a' && c <= 'z') { if (up) buf[i] = (uint8_t)(c - 32); up = !up; }
+      else if (c >= 'A' && c <= 'Z') { if (!up) buf[i] = (uint8_t)(c + 32); up = !up; }
+    }
+  }
+  if (m & HTTP_HOSTCASE) { buf[h] = 'h'; buf[h + 1] = 'o'; buf[h + 2] = 's'; buf[h + 3] = 't'; }
+  if (m & (HTTP_NOSPACE | HTTP_HOSTTAB)) {
+    /* The whitespace between "Host:" and the name, h+5 .. v, becomes none
+     * or one tab. */
+    int want = (m & HTTP_NOSPACE) ? 0 : 1, have = v - (h + 5);
+    if (len - have + want <= cap) {
+      memmove(buf + h + 5 + want, buf + v, (size_t)(len - v));
+      if (want) buf[h + 5] = '\t';
+      len += want - have;
+      pi->host_off += want - have;
+    }
+  }
+  if ((m & HTTP_METHODEOL) && len + 2 <= cap) {
+    memmove(buf + 2, buf, (size_t)len);
+    buf[0] = '\r'; buf[1] = '\n';
+    len += 2;
+    pi->http_hdr_off += 2;
+    pi->host_off += 2;
+  }
+  return len;
+}
+
+/* ── random-size segments (Xray's "fragment") ───────────────────────────
+ * The whole first payload leaves as segments of a random size in
+ * [chop_min, chop_max], each followed by a random pause in
+ * [chop_wait_min, chop_wait_max] ms. A filter that keys on the sizes or
+ * the timing of a cut it knows (the one always at the name, the one always
+ * one byte in) meets neither, and one that reads only the first segment or
+ * two never sees the name. The server receives the bytes exactly as they
+ * were. */
+static uint32_t chop_rand(uint32_t *s) {
+  uint32_t x = *s ? *s : 0x9e3779b9u;
+  x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+  return *s = x;
+}
+static int send_chopped(sock_t up, const uint8_t *buf, int len, const strategy *st) {
+  static _Atomic uint32_t calls = 0;
+  uint32_t seed = (uint32_t)now_ms() ^ (uint32_t)(uintptr_t)buf ^ (++calls * 2654435761u);
+  int lo = st->chop_min > 0 ? st->chop_min : 1, hi = st->chop_max >= lo ? st->chop_max : lo;
+  int off = 0;
+  while (off < len) {
+    int n = lo + (int)(chop_rand(&seed) % (uint32_t)(hi - lo + 1));
+    if (n > len - off) n = len - off;
+    if (sock_send_all(up, buf + off, (size_t)n, 0) != 0) return -1;
+    off += n;
+    if (off < len) {
+      sock_wait_sent(up, 10);
+      int w = st->chop_wait_min;
+      if (st->chop_wait_max > w) w += (int)(chop_rand(&seed) % (uint32_t)(st->chop_wait_max - w + 1));
+      if (w > 0) sleep_ms(w);
+    }
+  }
+  return 0;
+}
+
 int desync_send_first(sock_t up, int family,
                       uint8_t *payload, int len, int cap,
                       const proto_info *pi, const strategy *st,
                       _Atomic uint64_t *desync_counter) {
   if (len <= 0) return 0;
+
+  /* Plain HTTP rewrites (http(...)): done first, with the positions moved
+   * along, so every position below refers to the bytes that leave. */
+  proto_info pi_http;
+  for (int i = 0; i < st->n_ops; i++) {
+    if (st->ops[i].kind != OP_HTTP || pi->kind != PROTO_HTTP) continue;
+    pi_http = *pi;
+    len = http_rewrite(payload, len, cap, &pi_http, st->ops[i].offset);
+    pi = &pi_http;
+    break;
+  }
+
+  /* The name's own label, found after the HTTP rewrites (they move the name, never
+   * change its dots) and before anything below rewrites the payload. */
+  int sld[2] = { -1, -1 };
+  if (pi->host_off >= 0 && pi->host_len > 0 && pi->host_off + pi->host_len <= len)
+    sld_span(payload + pi->host_off, pi->host_len, sld);
 
   /* Optional HTTP Host case-scramble. */
   for (int i = 0; i < st->n_ops; i++) {
@@ -144,7 +302,7 @@ int desync_send_first(sock_t up, int family,
   for (int i = 0; i < st->n_ops; i++) {
     op_kind k = st->ops[i].kind;
     if (k != OP_SPLIT && k != OP_DISORDER) continue;
-    int p = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi);
+    int p = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi, sld);
     int dup = 0;
     for (int j = 0; j < nsplits; j++) if (splits[j] == p) dup = 1;
     if (!dup && nsplits < MAX_OPS) splits[nsplits++] = p;
@@ -152,10 +310,35 @@ int desync_send_first(sock_t up, int family,
   }
 
   /* Re-frame the handshake, then move any cut that now sits after the inserted
-   * record header. */
-  for (int i = 0; i < st->n_ops; i++) {
+   * record header. Several record cuts (more than one tlsrec): each record
+   * that holds a cut is cut there, the last cut first so the earlier
+   * positions still mean the same bytes. One record cut goes exactly as it
+   * always has (below). */
+  int nrec = 0;
+  for (int i = 0; i < st->n_ops; i++) if (st->ops[i].kind == OP_TLSREC) nrec++;
+  if (nrec > 1 && pi->kind == PROTO_TLS) {
+    int cuts[MAX_OPS]; int nc = 0;
+    for (int i = 0; i < st->n_ops; i++) {
+      if (st->ops[i].kind != OP_TLSREC) continue;
+      int p = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi, sld), dup = 0;
+      for (int j = 0; j < nc; j++) if (cuts[j] == p) dup = 1;
+      if (!dup) cuts[nc++] = p;
+    }
+    for (int i = 1; i < nc; i++) {        /* insertion sort, descending */
+      int v = cuts[i], j = i - 1;
+      while (j >= 0 && cuts[j] < v) { cuts[j + 1] = cuts[j]; j--; }
+      cuts[j + 1] = v;
+    }
+    for (int i = 0; i < nc; i++) {
+      int nl = tls_split_at(payload, len, cap, cuts[i]);
+      if (nl < 0) continue;
+      for (int j = 0; j < nsplits; j++) if (splits[j] > cuts[i]) splits[j] += 5;
+      len = nl;
+    }
+  }
+  for (int i = 0; i < st->n_ops && nrec == 1; i++) {
     if (st->ops[i].kind != OP_TLSREC || pi->kind != PROTO_TLS) continue;
-    int pos = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi);
+    int pos = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi, sld);
     int nl = tls_insert_record(payload, len, cap, pi->tls_record_total, pos);
     if (nl > 0) {
       for (int j = 0; j < nsplits; j++) if (splits[j] > pos) splits[j] += 5;
@@ -168,7 +351,7 @@ int desync_send_first(sock_t up, int family,
    * removes it again, so it is sent on its own rather than combined. */
   for (int i = 0; i < st->n_ops; i++) {
     if (st->ops[i].kind != OP_OOB) continue;
-    int pos = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi);
+    int pos = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi, sld);
     int r = send_oob_at(up, payload, len, pos);
     if (desync_counter) (*desync_counter)++;
     if (r == 0) return 0;
@@ -182,7 +365,7 @@ int desync_send_first(sock_t up, int family,
    * when TCP resends the segment. Not built on macOS — see fake.h. */
   for (int i = 0; i < st->n_ops; i++) {
     if (st->ops[i].kind != OP_FAKE || !fake_available()) continue;
-    int pos = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi);
+    int pos = resolve_pos(st->ops[i].ref, st->ops[i].offset, len, pi, sld);
     int done = fake_send_first(up, family, payload, pos, pi,
                                st->fake_ttl, st->fmode == FAKE_MD5);
     if (done <= 0) break;                 /* could not: fall through to the rest */
@@ -194,6 +377,14 @@ int desync_send_first(sock_t up, int family,
     return 0;
   }
 
+
+  /* Random-size segments (chop): the whole payload, as it now is, cut its
+   * own way; the cuts of split and disorder are not used beside it. */
+  for (int i = 0; i < st->n_ops; i++) {
+    if (st->ops[i].kind != OP_CHOP) continue;
+    if (desync_counter) (*desync_counter)++;
+    return send_chopped(up, payload, len, st);
+  }
 
   for (int i = 1; i < nsplits; i++) {   /* insertion sort, ascending */
     int v = splits[i], j = i - 1;

@@ -35,7 +35,8 @@ const t = suite('engine-manager');
   t.ok(em.coming === false, 'nothing coming at rest');
   {
     // Another network or a wake: the engine drops what the old network's DNS
-    // answered (DNS-CLEAR); nothing is sent to an engine that is not running.
+    // answered (DNS-CLEAR), and the technique that opened sites there
+    // (NET-CHANGED); nothing is sent to an engine that is not running.
     const sent = [];
     const was = { proc: em.proc, active: em.active };
     em.proc = { stdin: { writable: true, write: (l) => sent.push(l) } };
@@ -44,7 +45,7 @@ const t = suite('engine-manager');
     em.active = true;
     const on = em.networkChanged();
     Object.assign(em, was);
-    t.ok(off === false && on === true && sent.join() === 'DNS-CLEAR\n', 'another network: the DNS answers of the old one are dropped, only while running');
+    t.ok(off === false && on === true && sent.join() === 'DNS-CLEAR\n,NET-CHANGED\n', 'another network: the DNS answers and the technique of the old one are dropped, only while running');
     const main = require('fs').readFileSync(path.join(ROOT, 'electron', 'main.js'), 'utf8');
     t.ok(/now !== networkPrint && engine\) engine\.networkChanged\(\)/.test(main) && /function onWake[\s\S]{0,900}engine\.networkChanged\(\)/.test(main),
       'main.js asks for it at a network change and at a wake');
@@ -238,6 +239,9 @@ const t = suite('engine-manager');
   mem.dnsProtection = false;
   em._onLine(JSON.stringify({ type: 'blocked', host: 'dead.example', strategy: '', attempts: 5, family: 'ipv4', note: 'silent' }));
   t.ok(logs.some((l) => l.startsWith('success: quiet.example: blocked here, opened with tlsrec-sni (2 tries, ipv4) — the network drops these connections silently')), 'silent-drop bypass says so');
+  // How long the site took to open, where the engine says.
+  em._onLine(JSON.stringify({ type: 'bypass', host: 'timed.example', strategy: 'tlsrec-sni-mid', attempts: 3, family: 'ipv4', ms: 2437 }));
+  t.ok(logs.includes('success: timed.example: blocked here, opened with tlsrec-sni-mid (3 tries, ipv4, 2.4 s)'), 'a bypass says how long the site took to open');
   t.ok(logs.some((l) => l.startsWith('warning: dead.example: no answer after 5 techniques (ipv4) — the network may be dropping these connections silently, or the site is down')), 'no answer at all is logged as such');
   t.ok(!blockedNotices.length, 'no answer at all is not announced as a blocked site');
   t.ok(mem.dnsProtection === false, 'no answer at all does not switch encrypted DNS back on');
@@ -342,6 +346,12 @@ const t = suite('engine-manager');
     em.proc = realProc;
     t.ok(written.join('') === 'LEARN gateway.discord.gg disorder-tlsrec 3600\nLEARN discord.com tlsrec-sni 0\n',
       `…and given to the engine with their age in seconds (${JSON.stringify(written.join(''))})`);
+    // A technique that opened its site again ("kept"): its age starts over,
+    // and nothing else is said or done for it.
+    const lines0 = logs.length;
+    em._onLine(JSON.stringify({ type: 'kept', host: 'gateway.discord.gg', strategy: 'disorder-tlsrec' }));
+    const ages = em._learned(Date.now()).filter(([h]) => h === 'gateway.discord.gg').map(([, v]) => Date.now() - v.t);
+    t.ok(ages.length === 1 && ages[0] < 5000 && logs.length === lines0, `"kept": the age the next engine is given starts over, silently (${ages[0]} ms)`);
     for (let i = 0; i < 320; i++) em._rememberTechnique(`h${i}.example`, 'tlsrec-sni', now - 1000 + i);
     t.ok(Object.keys(mem.learnedTechniques).length === 300 && mem.learnedTechniques['h319.example'] && !mem.learnedTechniques['h0.example'],
       'at most 300 are kept, the newest');

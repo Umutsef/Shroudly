@@ -35,6 +35,11 @@ class EngineEventTest {
     fun hostEvents() {
         val b = EngineEvent.parse("""{"type":"bypass","host":"example.com","strategy":"split(sni)","attempts":2,"family":"ipv4"}""")
         assertEquals(EngineEvent.Host("bypass", "example.com", "split(sni)", 2, "ipv4", null, null, false, false), b)
+        assertEquals("", (b as EngineEvent.Host).took)
+        // how long the site took to open, where the engine says (2.6.83 and later)
+        val timed = EngineEvent.parse("""{"type":"bypass","host":"a.example","strategy":"tlsrec-sni-mid","attempts":3,"family":"ipv4","ms":2437}""") as EngineEvent.Host
+        assertEquals(2437L, timed.ms)
+        assertEquals(", 2.4 s", timed.took)
         val c = EngineEvent.parse("""{"type":"cut","host":"a.example","strategy":"stall","attempts":64,"family":"ipv6","note":"site_ok"}""")
         assertEquals("site_ok", (c as EngineEvent.Host).note)
         assertEquals("ipv6", c.family)
@@ -46,6 +51,9 @@ class EngineEventTest {
         val r = EngineEvent.parse("""{"type":"unreachable","host":"149.154.167.50","stage":"connect","ips":1,"raw":true,"port":443,"cport":50123}""") as EngineEvent.Host
         assertTrue(r.raw && r.port == 443 && r.host == "149.154.167.50")
         assertTrue(!bl.raw && bl.port == 0)
+        // a technique kept for a site that opened it again: its age starts over
+        assertEquals(EngineEvent.Kept("discord.com", "tlsrec-sni-mid"),
+            EngineEvent.parse("""{"type":"kept","host":"discord.com","strategy":"tlsrec-sni-mid"}"""))
     }
 
     @Test

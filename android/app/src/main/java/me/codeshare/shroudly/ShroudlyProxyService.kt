@@ -309,6 +309,11 @@ class ShroudlyProxyService : Service() {
                 if (ev.avoid > 0) prefs.edit().putString(Avoids.KEY, Avoids.remember(prefs.getString(Avoids.KEY, null), ev.host, ev.avoid, now)).apply()
                 ShroudlyVpnService.logSite("${ev.host}: the app refused the certificate the server sent after ${ev.strategy}; the next connection uses ${ev.next.ifEmpty { "no technique" }} instead")
             }
+            // Its age starts over (Learned.remember checks the names); nothing for the log.
+            is EngineEvent.Kept -> if (ev.host.isNotEmpty() && !ev.strategy.startsWith("raw-")) synchronized(learned) {
+                learned.remember(ev.host, ev.strategy, System.currentTimeMillis())
+                getSharedPreferences("engine", Context.MODE_PRIVATE).edit().putString("learned", learned.encode()).apply()
+            }
             is EngineEvent.UdpFull -> log(ev.line)
             is EngineEvent.Stats -> {
                 // Carried traffic: a day protection worked (Usage), once a session.
@@ -357,7 +362,7 @@ class ShroudlyProxyService : Service() {
                     store.remember(ev.host, ev.strategy, System.currentTimeMillis())
                     getSharedPreferences("engine", Context.MODE_PRIVATE).edit().putString(if (raw) "learnedRaw" else "learned", store.encode()).apply()
                 }
-                if (first) ShroudlyVpnService.logSite("${ev.host}: blocked here, opened with ${ev.strategy} (${ev.attempts} tries, ${ev.family})")
+                if (first) ShroudlyVpnService.logSite("${ev.host}: blocked here, opened with ${ev.strategy} (${ev.attempts} tries, ${ev.family}${ev.took})")
             }
             "blocked" -> if (first) ShroudlyVpnService.logSite(when {
                 ev.alert -> "${ev.host}: the server refused the connection itself; not a block"
@@ -604,6 +609,8 @@ class ShroudlyProxyService : Service() {
         if (now == null) { kept.clear(); return }
         log("Network: ${Net.describe(cm, now)}")
         doh?.networkChanged()
+        // The technique that opened sites on the old network is not tried first on this one (engine.c, net_best).
+        engine?.send("NET-CHANGED")
         if (!keptGone && old != null && !Handover.endsOld(Handover.look(cm, old), Handover.look(cm, now))) {
             kept += old
             log("The network before (${Net.describe(cm, old)}) still works: apps' connections over it are kept until it goes")

@@ -1162,6 +1162,8 @@ class ShroudlyVpnService : VpnService() {
         if (Protection.troubleRes == R.string.androidNoNetwork) Protection.trouble(0)
         rawWatch.networkChanged()
         if (changed) doh?.networkChanged()
+        // The technique that opened sites on the old network is not tried first on this one (engine.c, net_best).
+        if (changed) engine?.send("NET-CHANGED")
         pathWatch.oneStrike = false
         healthReset(FIRST_PATH_CHECK_MS)
         // What was opened over the old network is ended, unless it still
@@ -1336,6 +1338,11 @@ class ShroudlyVpnService : VpnService() {
             is EngineEvent.Host -> onHost(ev)
             is EngineEvent.NetDns -> if (NetDnsText.once(ev, SystemClock.elapsedRealtime())) logSite(NetDnsText.line(ev))
             is EngineEvent.Refused -> onRefused(ev)
+            // Its age starts over (Learned.remember checks the names); nothing for the log.
+            is EngineEvent.Kept -> if (ev.host.isNotEmpty() && !ev.strategy.startsWith("raw-")) synchronized(learned) {
+                learned.remember(ev.host, ev.strategy, System.currentTimeMillis())
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("learned", learned.encode()).apply()
+            }
             is EngineEvent.UdpFull -> log(ev.line)
             is EngineEvent.Error -> log("engine: ${ev.message}")
             is EngineEvent.Upstream -> if (!ev.ok) ownServer.down(OwnServer.localIf(OwnServer.whyCode(ev.why), AppSettings.ownServer(this)?.host))
@@ -1377,7 +1384,7 @@ class ShroudlyVpnService : VpnService() {
                     store.remember(ev.host, ev.strategy, System.currentTimeMillis())
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(if (raw) "learnedRaw" else "learned", store.encode()).apply()
                 }
-                if (first) logSite { "${ev.host}: blocked here, opened with ${ev.strategy} (${ev.attempts} tries, ${ev.family})" }
+                if (first) logSite { "${ev.host}: blocked here, opened with ${ev.strategy} (${ev.attempts} tries, ${ev.family}${ev.took})" }
             }
             "blocked" -> if (first) logSite {
                 when {

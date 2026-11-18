@@ -1341,8 +1341,18 @@ class EngineManager {
           // A silent drop is a different kind of filter from one that refuses,
           // and worth telling apart when reading a report.
           const how = msg.note === 'silent' ? ' — the network drops these connections silently instead of refusing them' : '';
-          this.log('success', `${msg.host}: blocked here, opened with ${msg.strategy} (${msg.attempts} tries, ${msg.family})${how}`);
+          // How long it took to open (engines since 2.6.83 say): what the
+          // first visit to a blocked site cost, for a report to show.
+          const took = Number.isFinite(msg.ms) && msg.ms >= 0 ? `, ${(msg.ms / 1000).toFixed(1)} s` : '';
+          this.log('success', `${msg.host}: blocked here, opened with ${msg.strategy} (${msg.attempts} tries, ${msg.family}${took})${how}`);
         }
+        break;
+      // A technique kept here opened its site again (engine.c, hs_keep): its
+      // age starts over, so the next engine is not made to race the untouched
+      // request against it on the site's first connection. At most every ten
+      // minutes a site; nothing to say in the log.
+      case 'kept':
+        if (typeof msg.host === 'string' && typeof msg.strategy === 'string') this._rememberTechnique(msg.host, msg.strategy);
         break;
       case 'blocked':
         if (msg.raw) { try { this.onRaw('blocked', msg); } catch {} break; }
@@ -1617,9 +1627,14 @@ class EngineManager {
   /* Another network, or a wake (main.js): what the old network's DNS
    * answered through the plain or system fallback (a hotel portal's forged
    * answers before login among them) is dropped and its resolvers are asked
-   * again, instead of being kept for their TTL (doh.c, DNS-CLEAR). */
+   * again, instead of being kept for their TTL (doh.c, DNS-CLEAR). And the
+   * technique that opened sites on the old network is no longer tried first
+   * for new names on this one (engine.c, net_best; NET-CHANGED). */
   networkChanged() {
-    return this.active ? this._command('DNS-CLEAR') : false;
+    if (!this.active) return false;
+    const ok = this._command('DNS-CLEAR');
+    this._command('NET-CHANGED');
+    return ok;
   }
 
   // Ask the engine to probe a host (used by UI "test site").

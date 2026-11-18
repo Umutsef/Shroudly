@@ -97,6 +97,14 @@ trap cleanup EXIT
 
 fail() {
   say "FAILED: $*"
+  # What was on the screen: the window in front and the texts it showed, so a
+  # step that looks for something on screen says what it found instead.
+  say "in front: $(sh_ dumpsys window | grep -m1 -E 'mCurrentFocus|mFocusedWindow' | sed 's/^ *//')"
+  if sh_ uiautomator dump /sdcard/ui-fail.xml | grep -q "dumped to"; then
+    say "on screen: $(sh_ cat /sdcard/ui-fail.xml | grep -o 'text="[^"]\+"' | sed 's/^text=//' | head -60 | tr '\n' ' ')"
+  else
+    say "on screen: uiautomator could not read it ($(sh_ uiautomator dump /sdcard/ui-fail.xml | tail -1))"
+  fi
   say "app log:"
   adb_ logcat -d -s Shroudly:V 2>/dev/null | tail -40 || true
   exit 1
@@ -836,6 +844,13 @@ window() {
     ctl stop
     wait_for 30 tun_gone || fail "protection did not go off before the window checks"
     sh_ "am start -W -n $PKG/.MainActivity" >/dev/null
+  fi
+  # Its first opening after the copy was installed over itself is an update:
+  # What's new is shown, over everything a check looks for. Closed, as a
+  # user would.
+  if ui_has "What&apos;s new in\|What's new in"; then
+    sh_ "input keyevent KEYCODE_BACK" >/dev/null; sleep 1
+    say "What's new shown once after the update, closed"
   fi
 }
 # The links and Share logs are on the About tab, as on the desktop.
